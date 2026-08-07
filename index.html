@@ -460,8 +460,6 @@ screens.kioskPunch = () => punchScreen(state.selectedFuncionario, 'loja', "goTo(
 
 /* --- Modo pessoal --- */
 screens.personalGate = () => {
-  const session = lsGet(LS_PERSONAL_SESSION, null);
-  if (session) { state.personalUser = session; state.screen = 'personalPunch'; return screens.personalPunch(); }
   return `${topbar('Meu celular', "goTo('home')")}
     <div class="eyebrow">Entrar</div>
     <label>Usuário</label><input id="puser" placeholder="seu usuário" autocomplete="username">
@@ -486,8 +484,7 @@ function punchScreen(funcionario, dispositivo, onBack, allowLogout) {
       <div class="clock-display" id="liveClock">${fmtTime(new Date())}</div>
       <div id="punchGrid"></div>
     </div>
-    ${allowLogout ? `<button class="linkbtn" style="align-self:center" onclick="personalLogout()">Sair da conta</button>` : ''}
-    <script>loadPunchGrid('${funcionario.id}', '${dispositivo}')<\/script>`;
+    ${allowLogout ? `<button class="linkbtn" style="align-self:center" onclick="personalLogout()">Sair da conta</button>` : ''}`;
 }
 
 async function loadPunchGrid(funcionarioId, dispositivo) {
@@ -754,8 +751,7 @@ screens.adminDayEdit = () => {
       <option value="abono" ${especialAtual === 'abono' ? 'selected' : ''}>Abono / atestado</option>
     </select>
     <button class="btn btn-primary" style="margin-top:4px" onclick="salvarEdicaoDia()">Salvar</button>
-    <div class="muted-small">Deixe um horário em branco para apagar aquela batida. Preencha um horário onde ela esqueceu de bater. Feriados nacionais e do Rio (São Sebastião, São Jorge) já são detectados sozinhos — se ela bater ponto num desses dias, a hora extra de 100% é calculada automaticamente.</div>
-    <script>carregarCamposDia('${funcId}','${dataKey}')<\/script>`;
+    <div class="muted-small">Deixe um horário em branco para apagar aquela batida. Preencha um horário onde ela esqueceu de bater. Feriados nacionais e do Rio (São Sebastião, São Jorge) já são detectados sozinhos — se ela bater ponto num desses dias, a hora extra de 100% é calculada automaticamente.</div>`;
 };
 
 async function carregarCamposDia(funcId, dataKey) {
@@ -1002,10 +998,17 @@ async function baixarRelatorioPDF() {
    Ações
 --------------------------------------------------------------------- */
 function goTo(screen) {
+  if (screen === 'personalGate') {
+    const session = lsGet(LS_PERSONAL_SESSION, null);
+    if (session) { state.personalUser = session; goTo('personalPunch'); return; }
+  }
   state.screen = screen; render();
   if (screen === 'adminDaily') renderDailyOut();
   if (screen === 'adminFuncionarios') carregarListaFuncionarios();
   if (screen === 'adminReport') popularSelectRelatorio();
+  if (screen === 'kioskPunch') loadPunchGrid(state.selectedFuncionario.id, 'loja');
+  if (screen === 'personalPunch') loadPunchGrid(state.personalUser.id, 'pessoal');
+  if (screen === 'adminDayEdit') carregarCamposDia(state.adminEditDay.funcId, state.adminEditDay.dataKey);
 }
 
 function selectFuncionaria(id) { state.selectedFuncionario = state.funcionarios.find(f => f.id === id); state.pin = ''; state.pinVisivel = false; goTo('kioskPin'); }
