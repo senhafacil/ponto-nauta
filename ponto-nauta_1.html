@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Ponto Nauta</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1417; --surface:#171e23; --surface-2:#20282e; --line:#2a333a;
+    --ink:#eef2f4; --muted:#8b98a1;
+    --accent:#3aa6a0; --accent-ink:#06201d;
+    --amber:#e8a23a; --danger:#d9614f; --success:#49b285; --blue:#5b8dd9;
+    --radius:16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:'Inter',system-ui,sans-serif; min-height:100vh; display:flex; flex-direction:column; align-items:center;}
+  .app{width:100%; max-width:480px; min-height:100vh; display:flex; flex-direction:column; padding:20px 18px 40px;}
+  h1,h2,h3{font-family:'Manrope',sans-serif; margin:0;}
+  .eyebrow{font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:6px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;}
+  .brand{display:flex; align-items:center; gap:10px;}
+  .brand .mark{width:34px; height:34px; border-radius:10px; background:var(--accent); display:flex; align-items:center; justify-content:center; color:var(--accent-ink); font-family:'Manrope'; font-weight:800; font-size:15px;}
+  .brand span{font-family:'Manrope'; font-weight:800; font-size:17px;}
+  .linkbtn{background:none; border:none; color:var(--muted); font-size:13px; font-weight:600; cursor:pointer; font-family:'Inter';}
+  .linkbtn:hover{color:var(--ink);}
+  .tabs{display:flex; gap:6px; margin-bottom:16px; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:4px;}
+  .tab{flex:1; text-align:center; padding:9px 6px; border-radius:9px; font-size:13px; font-weight:700; cursor:pointer; color:var(--muted);}
+  .tab.active{background:var(--surface-2); color:var(--ink);}
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:14px;}
+  .screen{flex:1; display:flex; flex-direction:column;}
+  .clock-display{font-family:'Manrope'; font-weight:800; font-size:52px; letter-spacing:-.02em; text-align:center; margin:6px 0 2px; font-variant-numeric:tabular-nums;}
+  .date-display{text-align:center; color:var(--muted); font-size:14px; margin-bottom:18px;}
+  .btn{display:block; width:100%; border:none; border-radius:12px; padding:16px 18px; font-family:'Inter'; font-weight:700; font-size:15px; cursor:pointer; background:var(--surface-2); color:var(--ink); text-align:left;}
+  .btn:active{transform:scale(.98);}
+  .btn-primary{background:var(--accent); color:var(--accent-ink); text-align:center; font-size:16px;}
+  .btn-outline{background:transparent; border:1px solid var(--line); text-align:center;}
+  .btn + .btn{margin-top:10px;}
+  .btn[disabled]{opacity:.4; cursor:not-allowed;}
+  .list-item{display:flex; align-items:center; gap:12px; width:100%; background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; text-align:left; color:var(--ink); font-family:'Inter'; font-size:15px; font-weight:600;}
+  .avatar{width:38px; height:38px; border-radius:50%; background:var(--surface); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'Manrope'; font-weight:800; font-size:14px; flex-shrink:0;}
+  input,select{width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:13px 14px; font-size:15px; font-family:'Inter'; margin-bottom:12px;}
+  input:focus,select:focus{outline:none; border-color:var(--accent);}
+  label{font-size:12px; color:var(--muted); font-weight:600; display:block; margin-bottom:6px;}
+  .pin-dots{display:flex; justify-content:center; gap:14px; margin:22px 0;}
+  .pin-dot{width:16px; height:16px; border-radius:50%; border:2px solid var(--line);}
+  .pin-dot.filled{background:var(--accent); border-color:var(--accent);}
+  .keypad{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:10px;}
+  .key{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:18px 0; font-family:'Manrope'; font-weight:700; font-size:20px; color:var(--ink); cursor:pointer; text-align:center;}
+  .key.wide{font-size:14px; color:var(--muted);}
+  .punch-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;}
+  .punch-btn{border-radius:14px; padding:20px 12px; border:1px solid var(--line); background:var(--surface-2); color:var(--ink); font-family:'Manrope'; font-weight:700; font-size:14px; cursor:pointer; text-align:center;}
+  .punch-btn .t{display:block; font-size:11px; color:var(--muted); font-weight:600; margin-top:4px; font-family:'Inter';}
+  .punch-btn[disabled]{opacity:.35;}
+  .punch-btn.next{border-color:var(--accent); background:rgba(58,166,160,.12);}
+  .feedback{position:fixed; inset:0; background:rgba(10,14,17,.92); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:50; text-align:center; padding:30px;}
+  .feedback .icon{width:78px; height:78px; border-radius:50%; background:var(--success); display:flex; align-items:center; justify-content:center; margin-bottom:18px; font-size:36px;}
+  .feedback h2{font-size:22px; margin-bottom:6px;}
+  .feedback p{color:var(--muted); margin:0;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th,td{padding:9px 6px; text-align:left; border-bottom:1px solid var(--line);}
+  th{color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em;}
+  td.num{text-align:right; font-variant-numeric:tabular-nums;}
+  .extra{color:var(--amber); font-weight:700;}
+  .deficit{color:var(--danger); font-weight:700;}
+  .summary-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0;}
+  .summary-grid.g3{grid-template-columns:1fr 1fr 1fr;}
+  .summary-box{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px;}
+  .summary-box .n{font-family:'Manrope'; font-weight:800; font-size:19px;}
+  .summary-box .l{font-size:10.5px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.02em; margin-top:2px;}
+  .empty{color:var(--muted); font-size:14px; text-align:center; padding:30px 10px;}
+  .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--surface-2); border:1px solid var(--line); padding:10px 16px; border-radius:10px; font-size:13px; z-index:60;}
+  .muted-small{font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.5;}
+  .badge{display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:700; white-space:nowrap;}
+  .badge .dot{width:6px; height:6px; border-radius:50%;}
+  .badge-completo{background:rgba(73,178,133,.14); color:var(--success);}
+  .badge-completo .dot{background:var(--success);}
+  .badge-andamento{background:rgba(232,162,58,.14); color:var(--amber);}
+  .badge-andamento .dot{background:var(--amber);}
+  .badge-incompleto{background:rgba(217,97,79,.14); color:var(--danger);}
+  .badge-incompleto .dot{background:var(--danger);}
+  .badge-falta{background:rgba(217,97,79,.14); color:var(--danger);}
+  .badge-falta .dot{background:var(--danger);}
+  .badge-pendente{background:var(--surface-2); border:1px solid var(--line); color:var(--muted);}
+  .badge-pendente .dot{background:var(--muted);}
+  .badge-folga{background:rgba(91,141,217,.14); color:var(--blue);}
+  .badge-folga .dot{background:var(--blue);}
+  .badge-feriado{background:rgba(58,166,160,.16); color:var(--accent);}
+  .badge-feriado .dot{background:var(--accent);}
+  .day-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer;}
+  .day-row:last-child{border-bottom:none;}
+  .day-row .dinfo{display:flex; flex-direction:column;}
+  .day-row .dname{font-weight:700; font-size:13.5px; text-transform:capitalize;}
+  .day-row .dnums{font-size:11.5px; color:var(--muted); margin-top:2px;}
+  .emp-card{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:10px; cursor:pointer;}
+  .emp-card .top{display:flex; align-items:center; justify-content:space-between;}
+  .emp-card .times{display:flex; gap:14px; margin-top:10px; font-size:11.5px; color:var(--muted);}
+  .emp-card .times b{display:block; color:var(--ink); font-size:13px; font-family:'Manrope'; font-weight:700;}
+  .select-row{display:flex; gap:10px;}
+  .select-row select{margin-bottom:0;}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+
+<script>
+/* ======================================================================
+   PONTO CERTO — configuração
+   Troque pelas credenciais do seu projeto Supabase (Project Settings > API)
+   e pela senha do painel admin.
+   ====================================================================== */
+const SUPABASE_URL = 'https://kzsospnvnrotgpquvliy.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_D9fMdHocNzz_nkwhUmrwhw_6ifM0AUE';
+const ADMIN_PASSWORD = '@Matheus2023';
+
+const sb = (SUPABASE_URL.startsWith('http'))
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ---------------------------------------------------------------------
+   Regras da CLT aplicadas (mesmas usadas no controle da Luna Beleza)
+   - Jornada padrão: definida por funcionária (jornada_diaria_horas)
+   - Dias de folga fixa: definidos por funcionária (dias_folga, 0=dom..6=sáb)
+   - Intervalo obrigatório: 1h se a jornada do dia > 6h; 15min se >4h e <=6h; 0 se <=4h
+   - Tolerância de 5 min no intervalo (CLT Art.58)
+   - Intervalo suprimido/reduzido além da tolerância: trabalhou o período todo
+     + indenização (não é hora extra) de 1,5x sobre os minutos suprimidos (CLT Art.71 §4,
+     natureza indenizatória — não reflete em FGTS/13º/férias)
+   - Hora extra em dia normal: +50%
+   - Hora extra em dia marcado como feriado trabalhado: +100% (todo o período)
+   - Dia útil sem batida e sem justificativa: falta (débito da jornada do dia)
+   - Dias marcados como folga compensada ou abono/atestado: sem débito e sem crédito
+--------------------------------------------------------------------- */
+const TOLERANCIA_MIN = 5;
+
+/* ---------------------------------------------------------------------
+   Estado
+--------------------------------------------------------------------- */
+let state = {
+  screen: 'home',
+  funcionarios: [],
+  selectedFuncionario: null,
+  pin: '',
+  personalUser: null,
+  adminOk: false,
+  adminDailyFocus: null // id da funcionária focada no histórico
+};
+
+const TIPOS = [
+  { key: 'entrada',      label: 'Entrada',      short: 'Chegada' },
+  { key: 'saida_almoco', label: 'Saída almoço', short: 'Pausa' },
+  { key: 'volta_almoco', label: 'Volta almoço', short: 'Retorno' },
+  { key: 'saida',        label: 'Saída',        short: 'Fim do dia' }
+];
+
+/* ---------------------------------------------------------------------
+   Armazenamento local (cache + fila offline + marcações especiais)
+--------------------------------------------------------------------- */
+const LS_FUNCIONARIOS = 'ponto_funcionarios_cache';
+const LS_QUEUE = 'ponto_fila_offline';
+const LS_PERSONAL_SESSION = 'ponto_sessao_pessoal';
+
+function lsGet(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch (e) { return fallback; } }
+function lsSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+
+function diasEspeciaisKey(funcId) { return 'ponto_dias_especiais_' + funcId; }
+function getDiasEspeciais(funcId) { return lsGet(diasEspeciaisKey(funcId), {}); }
+function setDiaEspecial(funcId, dataKey, tipo) {
+  const d = getDiasEspeciais(funcId);
+  if (tipo) d[dataKey] = tipo; else delete d[dataKey];
+  lsSet(diasEspeciaisKey(funcId), d);
+}
+
+function queuePunch(entry) { const q = lsGet(LS_QUEUE, []); q.push(entry); lsSet(LS_QUEUE, q); }
+
+async function trySyncQueue() {
+  if (!sb) return;
+  const q = lsGet(LS_QUEUE, []);
+  if (!q.length) return;
+  const remaining = [];
+  for (const entry of q) {
+    const { error } = await sb.from('pontos').insert(entry);
+    if (error) remaining.push(entry);
+  }
+  lsSet(LS_QUEUE, remaining);
+}
+
+/* ---------------------------------------------------------------------
+   Dados: funcionárias
+--------------------------------------------------------------------- */
+async function loadFuncionarios() {
+  if (sb) {
+    const { data, error } = await sb.from('funcionarios').select('*').eq('ativo', true).order('nome');
+    if (!error && data) { state.funcionarios = data; lsSet(LS_FUNCIONARIOS, data); return data; }
+  }
+  const cached = lsGet(LS_FUNCIONARIOS, []);
+  state.funcionarios = cached;
+  return cached;
+}
+function initials(nome) { return nome.trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase(); }
+
+/* ---------------------------------------------------------------------
+   Registrar ponto
+--------------------------------------------------------------------- */
+async function registrarPonto(funcionarioId, tipo, dispositivo) {
+  const entry = { funcionario_id: funcionarioId, tipo, dispositivo, registrado_em: new Date().toISOString() };
+  if (sb) { const { error } = await sb.from('pontos').insert(entry); if (error) queuePunch(entry); }
+  else queuePunch(entry);
+  return entry;
+}
+
+function todayKey() { return new Date().toISOString().slice(0, 10); }
+
+async function getPunchesRange(funcionarioId, startDate, endDate) {
+  if (sb) {
+    const { data, error } = await sb.from('pontos').select('*')
+      .eq('funcionario_id', funcionarioId)
+      .gte('registrado_em', startDate.toISOString())
+      .lt('registrado_em', endDate.toISOString())
+      .order('registrado_em');
+    if (!error) return data || [];
+  }
+  const q = lsGet(LS_QUEUE, []);
+  return q.filter(p => p.funcionario_id === funcionarioId && new Date(p.registrado_em) >= startDate && new Date(p.registrado_em) < endDate);
+}
+
+async function getPunchesToday(funcionarioId) {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const end = new Date(start); end.setDate(end.getDate() + 1);
+  return getPunchesRange(funcionarioId, start, end);
+}
+
+function nextExpectedType(punchesToday) {
+  const done = punchesToday.map(p => p.tipo);
+  for (const t of TIPOS) if (!done.includes(t.key)) return t.key;
+  return null;
+}
+
+/* ---------------------------------------------------------------------
+   Relógio ao vivo
+--------------------------------------------------------------------- */
+let clockInterval = null;
+function startClock() {
+  clearInterval(clockInterval);
+  clockInterval = setInterval(() => { const el = document.getElementById('liveClock'); if (el) el.textContent = fmtTime(new Date()); }, 1000);
+}
+function fmtTime(d) { return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+function fmtTimeShort(iso) { return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
+function fmtDate(d) { return d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }); }
+function fmtHoras(min) { const sinal = min < 0 ? '-' : ''; min = Math.abs(min); const h = Math.floor(min / 60); const m = Math.round(min % 60); return sinal + h + 'h' + String(m).padStart(2, '0'); }
+
+/* ---------------------------------------------------------------------
+   Motor de cálculo — classifica e calcula um único dia
+--------------------------------------------------------------------- */
+function minutesBetween(a, b) { return Math.max(0, (new Date(b) - new Date(a)) / 60000); }
+
+function classificarDia(dataKey, funcionario, punches, isToday) {
+  const date = new Date(dataKey + 'T12:00:00');
+  const weekday = date.getDay();
+  const diasEspeciais = getDiasEspeciais(funcionario.id);
+  const especial = diasEspeciais[dataKey];
+  const isFolgaFixa = (funcionario.dias_folga || []).includes(weekday);
+  const jornada = (funcionario.jornada_diaria_horas || 8) * 60;
+  const temPonto = punches.length > 0;
+
+  const base = { dataKey, weekday, especial, trabalhado: 0, extra: 0, deficit: 0, indenizacao: 0, taxaExtra: 1.5, byTipo: {} };
+  punches.forEach(p => { base.byTipo[p.tipo] = p.registrado_em; });
+
+  if (!temPonto) {
+    if (isFolgaFixa || especial === 'folga_comp' || especial === 'abono') return { ...base, status: 'folga' };
+    if (especial === 'feriado') return { ...base, status: 'feriado' };
+    if (isToday) return { ...base, status: 'pendente' };
+    if (date > new Date()) return { ...base, status: 'futuro' };
+    return { ...base, status: 'falta', deficit: jornada };
+  }
+
+  const b = base.byTipo;
+  const completo = !!(b.entrada && b.saida);
+
+  if (!completo) {
+    let trabalhadoParcial = 0;
+    if (b.entrada && b.saida_almoco) trabalhadoParcial += minutesBetween(b.entrada, b.saida_almoco);
+    if (b.volta_almoco && b.saida) trabalhadoParcial += minutesBetween(b.volta_almoco, b.saida);
+    return { ...base, status: isToday ? 'andamento' : 'incompleto', trabalhado: trabalhadoParcial };
+  }
+
+  const span = minutesBetween(b.entrada, b.saida);
+  const breakTaken = (b.saida_almoco && b.volta_almoco) ? minutesBetween(b.saida_almoco, b.volta_almoco) : 0;
+  const requiredBreak = span > 360 ? 60 : (span > 240 ? 15 : 0);
+
+  let trabalhado, indenizacao = 0;
+  if (requiredBreak > 0 && breakTaken < requiredBreak - TOLERANCIA_MIN) {
+    trabalhado = span; // intervalo suprimido/reduzido: trabalhou o período todo
+    indenizacao = requiredBreak - breakTaken; // minutos-base para indenização (1,5x, não é hora extra)
+  } else {
+    trabalhado = span - breakTaken;
+  }
+
+  let extra = 0, deficit = 0, taxaExtra = 1.5;
+  if (especial === 'feriado') {
+    extra = trabalhado; // feriado trabalhado: tudo é extra a 100%
+    taxaExtra = 2;
+  } else {
+    extra = Math.max(0, trabalhado - jornada);
+    deficit = Math.max(0, jornada - trabalhado);
+  }
+
+  return { ...base, status: 'completo', trabalhado, extra, deficit, indenizacao, taxaExtra };
+}
+
+function statusMeta(status) {
+  const map = {
+    completo:   { label: 'Completo',        cls: 'completo' },
+    andamento:  { label: 'Em andamento',    cls: 'andamento' },
+    incompleto: { label: 'Incompleto',      cls: 'incompleto' },
+    falta:      { label: 'Não bateu',       cls: 'falta' },
+    pendente:   { label: 'Aguardando hoje', cls: 'pendente' },
+    folga:      { label: 'Folga',           cls: 'folga' },
+    feriado:    { label: 'Feriado',         cls: 'feriado' },
+    futuro:     { label: '—',               cls: 'pendente' }
+  };
+  return map[status] || map.pendente;
+}
+
+async function calcularPeriodo(funcionario, startDate, endDate) {
+  const punches = await getPunchesRange(funcionario.id, startDate, endDate);
+  const porDia = {};
+  punches.forEach(p => { const k = new Date(p.registrado_em).toISOString().slice(0, 10); (porDia[k] = porDia[k] || []).push(p); });
+  const hojeKey = todayKey();
+  const dias = [];
+  for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    dias.push(classificarDia(key, funcionario, porDia[key] || [], key === hojeKey));
+  }
+  return dias;
+}
+
+function resumoDias(dias) {
+  const r = { trabalhado: 0, extraNormal: 0, extraFeriado: 0, deficit: 0, indenizacaoMin: 0 };
+  dias.forEach(d => {
+    r.trabalhado += d.trabalhado;
+    if (d.especial === 'feriado') r.extraFeriado += d.extra; else r.extraNormal += d.extra;
+    r.deficit += d.deficit;
+    r.indenizacaoMin += d.indenizacao;
+  });
+  return r;
+}
+
+/* ---------------------------------------------------------------------
+   Render helpers
+--------------------------------------------------------------------- */
+function render() { const app = document.getElementById('app'); app.innerHTML = screens[state.screen] ? screens[state.screen]() : screens.home(); startClock(); }
+function showToast(msg) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 2200); }
+function topbar(title, onBack) { return `<div class="topbar"><div class="brand"><div class="mark">N</div><span>${title}</span></div>${onBack ? `<button class="linkbtn" onclick="${onBack}">Voltar</button>` : ''}</div>`; }
+function badge(status) { const m = statusMeta(status); return `<span class="badge badge-${m.cls}"><span class="dot"></span>${m.label}</span>`; }
+
+/* ---------------------------------------------------------------------
+   Telas
+--------------------------------------------------------------------- */
+const screens = {};
+
+screens.home = () => `
+  ${topbar('Ponto Nauta')}
+  <div class="screen">
+    <div class="eyebrow">Este aparelho é</div>
+    <button class="btn btn-primary" style="margin-bottom:10px" onclick="goTo('kioskSelect')">📍 O ponto da loja (uso compartilhado)</button>
+    <button class="btn btn-outline" onclick="goTo('personalGate')">📱 Meu celular pessoal</button>
+    <div style="flex:1"></div>
+    <button class="linkbtn" style="align-self:center; margin-top:20px" onclick="goTo('adminGate')">Painel administrativo</button>
+  </div>`;
+
+/* --- Modo loja (quiosque) --- */
+screens.kioskSelect = () => {
+  const list = state.funcionarios.map(f => `
+    <div class="list-item" onclick="selectFuncionaria('${f.id}')">
+      <div class="avatar">${initials(f.nome)}</div><div>${f.nome}</div>
+    </div>`).join('');
+  return `${topbar('Bater ponto', "goTo('home')")}
+    <div class="eyebrow">Quem está batendo o ponto?</div>
+    ${list || `<div class="empty">Nenhuma funcionária cadastrada ainda.<br>Cadastre em Supabase, tabela funcionarios.</div>`}`;
+};
+
+screens.kioskPin = () => {
+  const f = state.selectedFuncionario;
+  const dots = [0,1,2,3].map(i => `<div class="pin-dot ${state.pin.length > i ? 'filled' : ''}"></div>`).join('');
+  const keys = [1,2,3,4,5,6,7,8,9,'','0','⌫'];
+  const keypad = keys.map(k => k === '' ? `<div></div>` : k === '⌫' ? `<div class="key wide" onclick="pinBackspace()">⌫</div>` : `<div class="key" onclick="pinPress('${k}')">${k}</div>`).join('');
+  return `${topbar(f.nome, "goTo('kioskSelect')")}
+    <div class="eyebrow" style="text-align:center">Digite seu PIN</div>
+    <div class="pin-dots">${dots}</div><div class="keypad">${keypad}</div>`;
+};
+
+screens.kioskPunch = () => punchScreen(state.selectedFuncionario, 'loja', "goTo('kioskSelect')");
+
+/* --- Modo pessoal --- */
+screens.personalGate = () => {
+  const session = lsGet(LS_PERSONAL_SESSION, null);
+  if (session) { state.personalUser = session; state.screen = 'personalPunch'; return screens.personalPunch(); }
+  return `${topbar('Meu celular', "goTo('home')")}
+    <div class="eyebrow">Entrar</div>
+    <label>Usuário</label><input id="puser" placeholder="seu usuário" autocomplete="username">
+    <label>Senha</label><input id="ppass" type="password" placeholder="sua senha" autocomplete="current-password">
+    <button class="btn btn-primary" onclick="personalLogin()">Entrar</button>`;
+};
+screens.personalPunch = () => punchScreen(state.personalUser, 'pessoal', null, true);
+
+function punchScreen(funcionario, dispositivo, onBack, allowLogout) {
+  return `${topbar(funcionario.nome, onBack)}
+    <div class="card">
+      <div class="date-display" style="text-transform:capitalize">${fmtDate(new Date())}</div>
+      <div class="clock-display" id="liveClock">${fmtTime(new Date())}</div>
+      <div id="punchGrid"></div>
+    </div>
+    ${allowLogout ? `<button class="linkbtn" style="align-self:center" onclick="personalLogout()">Sair da conta</button>` : ''}
+    <script>loadPunchGrid('${funcionario.id}', '${dispositivo}')<\/script>`;
+}
+
+async function loadPunchGrid(funcionarioId, dispositivo) {
+  const punches = await getPunchesToday(funcionarioId);
+  const next = nextExpectedType(punches);
+  const grid = document.getElementById('punchGrid');
+  if (!grid) return;
+  grid.className = 'punch-grid';
+  grid.innerHTML = TIPOS.map(t => {
+    const done = punches.some(p => p.tipo === t.key);
+    const isNext = t.key === next;
+    return `<button class="punch-btn ${isNext ? 'next' : ''}" ${(done || !isNext) ? 'disabled' : ''}
+      onclick="doPunch('${funcionarioId}', '${t.key}', '${dispositivo}')">${t.label}
+      <span class="t">${done ? '✓ registrado' : t.short}</span></button>`;
+  }).join('');
+}
+
+async function doPunch(funcionarioId, tipo, dispositivo) {
+  await registrarPonto(funcionarioId, tipo, dispositivo);
+  showFeedback(TIPOS.find(t => t.key === tipo).label);
+  await loadPunchGrid(funcionarioId, dispositivo);
+}
+function showFeedback(label) {
+  const el = document.createElement('div'); el.className = 'feedback';
+  el.innerHTML = `<div class="icon">✓</div><h2>${label} registrada</h2><p>${fmtTime(new Date())}</p>`;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 1400);
+}
+
+/* --- Admin: gate --- */
+screens.adminGate = () => {
+  if (state.adminOk) { state.screen = 'adminHub'; return screens.adminHub(); }
+  return `${topbar('Painel admin', "goTo('home')")}
+    <label>Senha do painel</label><input id="apass" type="password" placeholder="senha">
+    <button class="btn btn-primary" onclick="adminLogin()">Entrar</button>`;
+};
+
+screens.adminHub = () => `
+  ${topbar('Painel admin', "goTo('home')")}
+  <button class="btn btn-primary" style="margin-bottom:10px" onclick="goTo('adminDaily')">📅 Acompanhamento diário</button>
+  <button class="btn btn-outline" onclick="goTo('adminReport')">📄 Relatório mensal (CLT)</button>`;
+
+/* --- Admin: acompanhamento diário (hoje + histórico) --- */
+screens.adminDaily = () => {
+  const focus = state.adminDailyFocus;
+  const opts = `<option value="">Todas — visão de hoje</option>` + state.funcionarios.map(f => `<option value="${f.id}" ${focus === f.id ? 'selected' : ''}>${f.nome}</option>`).join('');
+  return `${topbar('Acompanhamento', "goTo('adminHub')")}
+    <select id="dailySel" onchange="setDailyFocus(this.value)">${opts}</select>
+    <div id="dailyOut"><div class="empty">Carregando...</div></div>`;
+};
+
+async function setDailyFocus(id) { state.adminDailyFocus = id || null; renderDailyOut(); }
+
+async function renderDailyOut() {
+  const out = document.getElementById('dailyOut');
+  if (!out) return;
+  out.innerHTML = `<div class="empty">Carregando...</div>`;
+  if (!state.adminDailyFocus) {
+    const cards = await Promise.all(state.funcionarios.map(async f => {
+      const punches = await getPunchesToday(f.id);
+      const dia = classificarDia(todayKey(), f, punches, true);
+      const marks = TIPOS.map(t => `${dia.byTipo[t.key] ? '✓ ' + t.short + ' ' + fmtTimeShort(dia.byTipo[t.key]) : '· ' + t.short + ' —'}`).join('  ');
+      return `<div class="emp-card" onclick="setDailyFocus('${f.id}'); document.getElementById('dailySel').value='${f.id}'">
+        <div class="top"><b>${f.nome}</b>${badge(dia.status)}</div>
+        <div class="times">${marks}</div>
+      </div>`;
+    }));
+    out.innerHTML = `<div class="eyebrow" style="margin-top:6px">Hoje, ${fmtDate(new Date())}</div>` + cards.join('');
+    return;
+  }
+  const f = state.funcionarios.find(x => x.id === state.adminDailyFocus);
+  const end = new Date(); end.setHours(0,0,0,0); end.setDate(end.getDate() + 1);
+  const start = new Date(end); start.setDate(start.getDate() - 21);
+  const dias = await calcularPeriodo(f, start, end);
+  dias.reverse();
+  const rows = dias.map(d => {
+    const dateObj = new Date(d.dataKey + 'T12:00:00');
+    const label = d.dataKey === todayKey() ? 'Hoje' : dateObj.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    const nums = (d.status === 'completo' || d.status === 'andamento' || d.status === 'incompleto')
+      ? `${fmtHoras(d.trabalhado)} trabalhado${d.extra > 0 ? ' · +' + fmtHoras(d.extra) + ' extra' : ''}${d.deficit > 0 ? ' · -' + fmtHoras(d.deficit) : ''}${d.indenizacao > 0 ? ' · intervalo suprimido' : ''}`
+      : '';
+    return `<div class="day-row" onclick="editarDiaEspecial('${f.id}','${d.dataKey}')">
+      <div class="dinfo"><div class="dname">${label}</div><div class="dnums">${nums}</div></div>
+      ${badge(d.status)}
+    </div>`;
+  }).join('');
+  out.innerHTML = `
+    <div class="eyebrow" style="margin-top:6px">${f.nome} · últimos 21 dias</div>
+    <div class="card" style="padding:6px 14px">${rows}</div>
+    <div class="muted-small">Toque num dia para marcar feriado trabalhado, folga compensada ou abono/atestado.</div>
+  `;
+}
+
+function editarDiaEspecial(funcId, dataKey) {
+  const atual = getDiasEspeciais(funcId)[dataKey] || '';
+  const opcoes = 'Deixe em branco para normal.\nOpções: feriado / folga_comp / abono';
+  const val = prompt(`Marcar ${dataKey} como (atual: ${atual || 'normal'}):\n${opcoes}`, atual);
+  if (val === null) return;
+  const limpo = val.trim().toLowerCase();
+  setDiaEspecial(funcId, dataKey, ['feriado','folga_comp','abono'].includes(limpo) ? limpo : null);
+  renderDailyOut();
+}
+
+/* --- Admin: relatório mensal (CLT) --- */
+screens.adminReport = () => {
+  const opts = state.funcionarios.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+  const hoje = new Date();
+  const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'].map((m, i) => `<option value="${i}" ${i === hoje.getMonth() ? 'selected' : ''}>${m}</option>`).join('');
+  return `${topbar('Relatório mensal', "goTo('adminHub')")}
+    <select id="repFunc">${opts}</select>
+    <div class="select-row">
+      <select id="repMes">${meses}</select>
+      <select id="repAno">${Array.from({length:6}, (_,i)=>hoje.getFullYear()-i).map(a=>`<option value="${a}">${a}</option>`).join('')}</select>
+    </div>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="carregarRelatorio()">Gerar relatório</button>
+    <div id="repOut"></div>`;
+};
+
+async function carregarRelatorio() {
+  const funcId = document.getElementById('repFunc').value;
+  const mes = parseInt(document.getElementById('repMes').value);
+  const ano = parseInt(document.getElementById('repAno').value);
+  const func = state.funcionarios.find(f => f.id === funcId);
+  const out = document.getElementById('repOut');
+  out.innerHTML = `<div class="empty">Calculando...</div>`;
+  const start = new Date(ano, mes, 1);
+  const end = new Date(ano, mes + 1, 1);
+  const dias = await calcularPeriodo(func, start, end);
+  const r = resumoDias(dias);
+  const valorHora = func.valor_hora || 0;
+  const valorExtras = (r.extraNormal / 60) * valorHora * 1.5 + (r.extraFeriado / 60) * valorHora * 2;
+  const valorIndenizacao = (r.indenizacaoMin / 60) * valorHora * 1.5;
+  const linhas = dias.filter(d => d.status !== 'futuro').map(d => `
+    <tr>
+      <td>${new Date(d.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'})} ${badge(d.status)}</td>
+      <td class="num">${d.trabalhado ? fmtHoras(d.trabalhado) : '—'}</td>
+      <td class="num ${d.extra > 0 ? 'extra' : ''}">${d.extra > 0 ? fmtHoras(d.extra) : '—'}</td>
+      <td class="num ${d.deficit > 0 ? 'deficit' : ''}">${d.deficit > 0 ? fmtHoras(d.deficit) : '—'}</td>
+    </tr>`).join('');
+  out.innerHTML = `
+    <div class="summary-grid g3">
+      <div class="summary-box"><div class="n">${fmtHoras(r.trabalhado)}</div><div class="l">Trabalhadas</div></div>
+      <div class="summary-box"><div class="n">${fmtHoras(r.extraNormal + r.extraFeriado)}</div><div class="l">Extras</div></div>
+      <div class="summary-box"><div class="n">${fmtHoras(r.deficit)}</div><div class="l">Devedoras</div></div>
+    </div>
+    ${valorHora ? `<div class="summary-grid">
+      <div class="summary-box"><div class="n">R$ ${valorExtras.toFixed(2)}</div><div class="l">Valor horas extras</div></div>
+      <div class="summary-box"><div class="n">R$ ${valorIndenizacao.toFixed(2)}</div><div class="l">Indenização intervalo</div></div>
+    </div>` : ''}
+    <div class="card" style="padding:14px">
+      <table><thead><tr><th>Dia</th><th style="text-align:right">Trab.</th><th style="text-align:right">Extra</th><th style="text-align:right">Devedora</th></tr></thead>
+      <tbody>${linhas || '<tr><td colspan="4" class="empty">Sem registros neste mês</td></tr>'}</tbody></table>
+    </div>
+    <div class="muted-small">Jornada: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · extra normal +50%, feriado trabalhado +100% ·
+    intervalo obrigatório 1h (jornada &gt;6h) ou 15min (&gt;4h), tolerância de ${TOLERANCIA_MIN}min · intervalo suprimido além da tolerância gera indenização de 1,5x (não é hora extra, não reflete em FGTS/13º/férias) ·
+    dias marcados como folga compensada/abono não geram débito. Ajuste feriados, folgas e abonos na tela de Acompanhamento diário.</div>`;
+}
+
+/* ---------------------------------------------------------------------
+   Ações
+--------------------------------------------------------------------- */
+function goTo(screen) { state.screen = screen; render(); if (screen === 'adminDaily') renderDailyOut(); }
+
+function selectFuncionaria(id) { state.selectedFuncionario = state.funcionarios.find(f => f.id === id); state.pin = ''; goTo('kioskPin'); }
+
+function pinPress(d) { if (state.pin.length >= 4) return; state.pin += d; render(); if (state.pin.length === 4) checkPin(); }
+function pinBackspace() { state.pin = state.pin.slice(0, -1); render(); }
+function checkPin() {
+  const f = state.selectedFuncionario;
+  if (String(f.pin) === state.pin) goTo('kioskPunch');
+  else { showToast('PIN incorreto'); state.pin = ''; setTimeout(render, 400); }
+}
+
+async function personalLogin() {
+  const usuario = document.getElementById('puser').value.trim();
+  const senha = document.getElementById('ppass').value;
+  if (!usuario || !senha) return showToast('Preencha usuário e senha');
+  const found = state.funcionarios.find(f => f.usuario === usuario && f.senha === senha);
+  if (!found) return showToast('Usuário ou senha incorretos');
+  lsSet(LS_PERSONAL_SESSION, found); state.personalUser = found; goTo('personalPunch');
+}
+function personalLogout() { localStorage.removeItem(LS_PERSONAL_SESSION); state.personalUser = null; goTo('home'); }
+
+function adminLogin() {
+  const pass = document.getElementById('apass').value;
+  if (pass === ADMIN_PASSWORD) { state.adminOk = true; goTo('adminHub'); } else showToast('Senha incorreta');
+}
+
+/* ---------------------------------------------------------------------
+   Init
+--------------------------------------------------------------------- */
+async function init() { await loadFuncionarios(); trySyncQueue(); render(); }
+init();
+</script>
+</body>
+</html>
