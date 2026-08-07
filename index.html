@@ -188,6 +188,7 @@ let state = {
   funcionarios: [],
   selectedFuncionario: null,
   pin: '',
+  pinVisivel: false,
   personalUser: null,
   adminOk: false,
   adminDailyFocus: null, // id da funcionária focada no histórico
@@ -436,13 +437,17 @@ screens.kioskSelect = () => {
 
 screens.kioskPin = () => {
   const f = state.selectedFuncionario;
-  const dots = [0,1,2,3].map(i => `<div class="pin-dot ${state.pin.length > i ? 'filled' : ''}"></div>`).join('');
+  const visivel = state.pinVisivel;
+  const dots = [0,1,2,3].map(i => `<div class="pin-dot ${state.pin.length > i ? 'filled' : ''}">${visivel && state.pin[i] ? state.pin[i] : ''}</div>`).join('');
   const keys = [1,2,3,4,5,6,7,8,9,'','0','⌫'];
   const keypad = keys.map(k => k === '' ? `<div></div>` : k === '⌫' ? `<div class="key wide" onclick="pinBackspace()">⌫</div>` : `<div class="key" onclick="pinPress('${k}')">${k}</div>`).join('');
   return `${topbar(f.nome, "goTo('kioskSelect')")}
     <div class="eyebrow" style="text-align:center">Digite seu PIN</div>
-    <div class="pin-dots">${dots}</div><div class="keypad">${keypad}</div>`;
+    <div class="pin-dots">${dots}</div>
+    <button class="linkbtn" style="align-self:center; margin-bottom:8px" onclick="togglePinVisivel()">${visivel ? '🙈 Esconder' : '👁 Ver PIN'}</button>
+    <div class="keypad">${keypad}</div>`;
 };
+function togglePinVisivel() { state.pinVisivel = !state.pinVisivel; render(); }
 
 screens.kioskPunch = () => punchScreen(state.selectedFuncionario, 'loja', "goTo('kioskSelect')");
 
@@ -453,9 +458,18 @@ screens.personalGate = () => {
   return `${topbar('Meu celular', "goTo('home')")}
     <div class="eyebrow">Entrar</div>
     <label>Usuário</label><input id="puser" placeholder="seu usuário" autocomplete="username">
-    <label>Senha</label><input id="ppass" type="password" placeholder="sua senha" autocomplete="current-password">
+    <label>Senha</label>
+    <div style="position:relative">
+      <input id="ppass" type="password" placeholder="sua senha" autocomplete="current-password" style="padding-right:44px">
+      <button type="button" onclick="togglePwdField('ppass', this)" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer;">👁</button>
+    </div>
     <button class="btn btn-primary" onclick="personalLogin()">Entrar</button>`;
 };
+function togglePwdField(id, btn) {
+  const el = document.getElementById(id);
+  if (el.type === 'password') { el.type = 'text'; btn.textContent = '🙈'; }
+  else { el.type = 'password'; btn.textContent = '👁'; }
+}
 screens.personalPunch = () => punchScreen(state.personalUser, 'pessoal', null, true);
 
 function punchScreen(funcionario, dispositivo, onBack, allowLogout) {
@@ -530,12 +544,24 @@ async function carregarListaFuncionarios() {
         <span class="badge ${f.ativo ? 'badge-completo' : 'badge-falta'}"><span class="dot"></span>${f.ativo ? 'Ativa' : 'Inativa'}</span>
       </div>
       <div class="times">PIN ${f.pin || '—'} · usuário ${f.usuario || '—'} · ${(f.jornada_diaria_horas||8)}h/dia</div>
+      ${f.pin_bloqueado || f.senha_bloqueada ? `<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+        ${f.pin_bloqueado ? `<span class="badge badge-falta">🔒 PIN bloqueado</span>` : ''}
+        ${f.senha_bloqueada ? `<span class="badge badge-falta">🔒 Senha bloqueada</span>` : ''}
+      </div>` : ''}
       <div class="btn-row" style="margin-top:12px">
         <button class="btn btn-outline" style="padding:10px" onclick="abrirFormFuncionaria('${f.id}')">Editar</button>
         <button class="btn ${f.ativo ? 'btn-danger' : 'btn-outline'}" style="padding:10px" onclick="alternarAtivo('${f.id}', ${f.ativo})">${f.ativo ? 'Desativar' : 'Ativar'}</button>
       </div>
+      ${f.pin_bloqueado || f.senha_bloqueada ? `<button class="btn btn-outline" style="margin-top:8px; padding:10px" onclick="desbloquear('${f.id}')">🔓 Desbloquear PIN e senha</button>` : ''}
       <button class="linkbtn" style="margin-top:8px; color:var(--danger)" onclick="excluirFuncionaria('${f.id}', '${f.nome.replace(/'/g,"\\'")}')">Excluir cadastro</button>
     </div>`).join('') || `<div class="empty">Nenhuma funcionária cadastrada ainda.</div>`;
+}
+
+async function desbloquear(id) {
+  const { error } = await sb.from('funcionarios').update({ pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false }).eq('id', id);
+  if (error) return showToast('Erro: ' + error.message);
+  showToast('Desbloqueada!');
+  carregarListaFuncionarios();
 }
 
 async function excluirFuncionaria(id, nome) {
@@ -573,7 +599,8 @@ screens.adminFuncionarioForm = () => {
     <label>Valor da hora (R$, opcional)</label><input id="fValorHora" type="number" step="0.01" value="${f ? (f.valor_hora||'') : ''}" placeholder="opcional">
     <label>Dias de folga fixa</label>
     <div style="margin-bottom:12px">${checkboxes}</div>
-    <button class="btn btn-primary" onclick="salvarFuncionaria('${id||''}')">${id ? 'Salvar alterações' : 'Cadastrar'}</button>`;
+    <button class="btn btn-primary" onclick="salvarFuncionaria('${id||''}')">${id ? 'Salvar alterações' : 'Cadastrar'}</button>
+    ${id ? `<div class="muted-small">Salvar aqui também desbloqueia o PIN e a senha, caso estivessem bloqueados.</div>` : ''}`;
 };
 
 async function salvarFuncionaria(id) {
@@ -589,7 +616,8 @@ async function salvarFuncionaria(id) {
     jornada_diaria_horas: parseFloat(document.getElementById('fJornada').value) || 8,
     valor_hora: parseFloat(document.getElementById('fValorHora').value) || null,
     dias_folga: diasFolga,
-    ativo: true
+    ativo: true,
+    pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false
   };
   const { error } = id
     ? await sb.from('funcionarios').update(payload).eq('id', id)
@@ -939,23 +967,59 @@ function goTo(screen) {
   if (screen === 'adminReport') popularSelectRelatorio();
 }
 
-function selectFuncionaria(id) { state.selectedFuncionario = state.funcionarios.find(f => f.id === id); state.pin = ''; goTo('kioskPin'); }
+function selectFuncionaria(id) { state.selectedFuncionario = state.funcionarios.find(f => f.id === id); state.pin = ''; state.pinVisivel = false; goTo('kioskPin'); }
 
 function pinPress(d) { if (state.pin.length >= 4) return; state.pin += d; render(); if (state.pin.length === 4) checkPin(); }
 function pinBackspace() { state.pin = state.pin.slice(0, -1); render(); }
-function checkPin() {
+
+async function checkPin() {
   const f = state.selectedFuncionario;
-  if (String(f.pin) === state.pin) goTo('kioskPunch');
-  else { showToast('PIN incorreto'); state.pin = ''; setTimeout(render, 400); }
+  if (!sb) {
+    if (String(f.pin) === state.pin) goTo('kioskPunch');
+    else { showToast('PIN incorreto'); state.pin = ''; setTimeout(render, 400); }
+    return;
+  }
+  const { data: fresh } = await sb.from('funcionarios').select('id, pin, pin_tentativas, pin_bloqueado').eq('id', f.id).maybeSingle();
+  if (!fresh) { showToast('Erro ao verificar PIN'); state.pin = ''; setTimeout(render, 400); return; }
+  if (fresh.pin_bloqueado) {
+    showToast('🔒 PIN bloqueado após 3 tentativas erradas. Peça para a administradora desbloquear.');
+    state.pin = ''; setTimeout(render, 600);
+    return;
+  }
+  if (String(fresh.pin) === state.pin) {
+    await sb.from('funcionarios').update({ pin_tentativas: 0 }).eq('id', f.id);
+    goTo('kioskPunch');
+  } else {
+    const tentativas = (fresh.pin_tentativas || 0) + 1;
+    const bloqueado = tentativas >= 3;
+    await sb.from('funcionarios').update({ pin_tentativas: tentativas, pin_bloqueado: bloqueado }).eq('id', f.id);
+    showToast(bloqueado ? '🔒 PIN bloqueado. Fale com a administradora.' : `PIN incorreto (tentativa ${tentativas} de 3)`);
+    state.pin = ''; setTimeout(render, 400);
+  }
 }
 
 async function personalLogin() {
   const usuario = document.getElementById('puser').value.trim();
   const senha = document.getElementById('ppass').value;
   if (!usuario || !senha) return showToast('Preencha usuário e senha');
-  const found = state.funcionarios.find(f => f.usuario === usuario && f.senha === senha);
+  if (!sb) {
+    const found = state.funcionarios.find(f => f.usuario === usuario && f.senha === senha);
+    if (!found) return showToast('Usuário ou senha incorretos');
+    lsSet(LS_PERSONAL_SESSION, found); state.personalUser = found; goTo('personalPunch');
+    return;
+  }
+  const { data: found } = await sb.from('funcionarios').select('*').eq('usuario', usuario).eq('ativo', true).maybeSingle();
   if (!found) return showToast('Usuário ou senha incorretos');
-  lsSet(LS_PERSONAL_SESSION, found); state.personalUser = found; goTo('personalPunch');
+  if (found.senha_bloqueada) return showToast('🔒 Senha bloqueada após 3 tentativas erradas. Peça para a administradora desbloquear.');
+  if (found.senha === senha) {
+    await sb.from('funcionarios').update({ senha_tentativas: 0 }).eq('id', found.id);
+    lsSet(LS_PERSONAL_SESSION, found); state.personalUser = found; goTo('personalPunch');
+  } else {
+    const tentativas = (found.senha_tentativas || 0) + 1;
+    const bloqueada = tentativas >= 3;
+    await sb.from('funcionarios').update({ senha_tentativas: tentativas, senha_bloqueada: bloqueada }).eq('id', found.id);
+    showToast(bloqueada ? '🔒 Senha bloqueada. Fale com a administradora.' : `Senha incorreta (tentativa ${tentativas} de 3)`);
+  }
 }
 function personalLogout() { localStorage.removeItem(LS_PERSONAL_SESSION); state.personalUser = null; goTo('home'); }
 
