@@ -414,19 +414,26 @@ function badge(status, extra) { const m = statusMeta(status); return `<span clas
 --------------------------------------------------------------------- */
 const screens = {};
 
-screens.home = () => `
+function isMobileDevice() { return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent); }
+
+screens.home = () => {
+  const mobile = isMobileDevice();
+  return `
   ${topbar('Ponto Nauta')}
   <div class="screen">
     <div class="eyebrow">Este aparelho é</div>
-    <button class="btn btn-primary" style="margin-bottom:10px" onclick="goTo('kioskSelect')">📍 O ponto da loja (uso compartilhado)</button>
-    <button class="btn btn-outline" onclick="goTo('personalGate')">📱 Meu celular pessoal</button>
+    ${!mobile ? `<button class="btn btn-primary" onclick="goTo('kioskSelect')">📍 O ponto da loja (uso compartilhado)</button>` : ''}
+    ${mobile ? `<button class="btn btn-primary" onclick="goTo('personalGate')">📱 Meu celular pessoal</button>` : ''}
     <div style="flex:1"></div>
     <button class="linkbtn" style="align-self:center; margin-top:20px" onclick="goTo('adminGate')">Painel administrativo</button>
   </div>`;
+};
 
 /* --- Modo loja (quiosque) --- */
 screens.kioskSelect = () => {
-  const list = state.funcionarios.map(f => `
+  const list = state.funcionarios
+    .filter(f => (f.dispositivo_permitido || 'ambos') !== 'pessoal')
+    .map(f => `
     <div class="list-item" onclick="selectFuncionaria('${f.id}')">
       <div class="avatar">${initials(f.nome)}</div><div>${f.nome}</div>
     </div>`).join('');
@@ -493,9 +500,29 @@ async function loadPunchGrid(funcionarioId, dispositivo) {
     const done = punches.some(p => p.tipo === t.key);
     const isNext = t.key === next;
     return `<button class="punch-btn ${isNext ? 'next' : ''}" ${(done || !isNext) ? 'disabled' : ''}
-      onclick="doPunch('${funcionarioId}', '${t.key}', '${dispositivo}')">${t.label}
+      onclick="confirmarPunch('${funcionarioId}', '${t.key}', '${dispositivo}')">${t.label}
       <span class="t">${done ? '✓ registrado' : t.short}</span></button>`;
   }).join('');
+}
+
+function confirmarPunch(funcionarioId, tipo, dispositivo) {
+  const tipoInfo = TIPOS.find(t => t.key === tipo);
+  const modal = document.createElement('div');
+  modal.className = 'feedback';
+  modal.id = 'confirmPunchModal';
+  modal.innerHTML = `
+    <div style="font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-weight:700; margin-bottom:8px;">Confirmar</div>
+    <h2 style="margin-bottom:2px;">${tipoInfo.label}</h2>
+    <div class="clock-display" style="margin:8px 0 26px;">${fmtTime(new Date())}</div>
+    <button class="btn btn-primary" style="width:230px" onclick="executarPunch('${funcionarioId}','${tipo}','${dispositivo}')">Tenho certeza</button>
+    <button class="btn btn-outline" style="width:230px; margin-top:10px;" onclick="document.getElementById('confirmPunchModal').remove()">Cancelar</button>
+  `;
+  document.body.appendChild(modal);
+}
+
+async function executarPunch(funcionarioId, tipo, dispositivo) {
+  document.getElementById('confirmPunchModal')?.remove();
+  await doPunch(funcionarioId, tipo, dispositivo);
 }
 
 async function doPunch(funcionarioId, tipo, dispositivo) {
@@ -547,7 +574,7 @@ async function carregarListaFuncionarios() {
         <b>${f.nome}</b>
         <span class="badge ${f.ativo ? 'badge-completo' : 'badge-falta'}"><span class="dot"></span>${f.ativo ? 'Ativa' : 'Inativa'}</span>
       </div>
-      <div class="times">PIN ${f.pin || '—'} · usuário ${f.usuario || '—'} · ${(f.jornada_diaria_horas||8)}h/dia</div>
+      <div class="times">PIN ${f.pin || '—'} · usuário ${f.usuario || '—'} · ${(f.jornada_diaria_horas||8)}h/dia${f.dispositivo_permitido && f.dispositivo_permitido !== 'ambos' ? ' · ' + (f.dispositivo_permitido === 'loja' ? 'só loja' : 'só celular') : ''}</div>
       ${f.pin_bloqueado || f.senha_bloqueada ? `<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
         ${f.pin_bloqueado ? `<span class="badge badge-falta">🔒 PIN bloqueado</span>` : ''}
         ${f.senha_bloqueada ? `<span class="badge badge-falta">🔒 Senha bloqueada</span>` : ''}
@@ -596,6 +623,12 @@ screens.adminFuncionarioForm = () => {
     </label>`).join('');
   return `${topbar(id ? 'Editar funcionária' : 'Nova funcionária', "goTo('adminFuncionarios')")}
     <label>Nome</label><input id="fNome" value="${f ? f.nome : ''}" placeholder="Nome completo">
+    <label>Onde ela pode bater ponto</label>
+    <select id="fDispositivo">
+      <option value="ambos" ${(!f || (f.dispositivo_permitido||'ambos')==='ambos') ? 'selected' : ''}>Computador da loja e celular pessoal</option>
+      <option value="loja" ${f && f.dispositivo_permitido==='loja' ? 'selected' : ''}>Só computador da loja</option>
+      <option value="pessoal" ${f && f.dispositivo_permitido==='pessoal' ? 'selected' : ''}>Só celular pessoal</option>
+    </select>
     <label>PIN (exatamente 4 números, ponto da loja)</label><input id="fPin" value="${f ? (f.pin||'') : ''}" placeholder="0000" maxlength="4" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
     <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Só números — é o que ela vai digitar no teclado do ponto da loja.</div>
     <label>Usuário (celular pessoal)</label><input id="fUsuario" value="${f ? (f.usuario||'') : ''}" placeholder="usuario">
@@ -623,6 +656,7 @@ async function salvarFuncionaria(id) {
     jornada_diaria_horas: parseFloat(document.getElementById('fJornada').value) || 8,
     valor_hora: parseFloat(document.getElementById('fValorHora').value) || null,
     dias_folga: diasFolga,
+    dispositivo_permitido: document.getElementById('fDispositivo').value,
     ativo: true,
     pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false
   };
@@ -1017,6 +1051,7 @@ async function personalLogin() {
   }
   const { data: found } = await sb.from('funcionarios').select('*').eq('usuario', usuario).eq('ativo', true).maybeSingle();
   if (!found) return showToast('Usuário ou senha incorretos');
+  if ((found.dispositivo_permitido || 'ambos') === 'loja') return showToast('Essa conta só pode bater ponto no computador da loja, não pelo celular.');
   if (found.senha_bloqueada) return showToast('🔒 Senha bloqueada após 3 tentativas erradas. Peça para a administradora desbloquear.');
   if (found.senha === senha) {
     await sb.from('funcionarios').update({ senha_tentativas: 0 }).eq('id', found.id);
