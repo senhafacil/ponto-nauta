@@ -423,7 +423,7 @@ screens.home = () => {
   <div class="screen">
     <div class="eyebrow">Este aparelho é</div>
     ${!mobile ? `<button class="btn btn-primary" onclick="goTo('kioskSelect')">📍 O ponto da loja (uso compartilhado)</button>` : ''}
-    ${mobile ? `<button class="btn btn-primary" onclick="goTo('personalGate')">📱 Meu celular pessoal</button>` : ''}
+    ${mobile ? `<button class="btn btn-primary" onclick="goTo('personalGate')">📱 Celular</button>` : ''}
     <div style="flex:1"></div>
     <button class="linkbtn" style="align-self:center; margin-top:20px" onclick="goTo('adminGate')">Painel administrativo</button>
   </div>`;
@@ -460,7 +460,7 @@ screens.kioskPunch = () => punchScreen(state.selectedFuncionario, 'loja', "goTo(
 
 /* --- Modo pessoal --- */
 screens.personalGate = () => {
-  return `${topbar('Meu celular', "goTo('home')")}
+  return `${topbar('Celular', "goTo('home')")}
     <div class="eyebrow">Entrar</div>
     <label>Usuário</label><input id="puser" placeholder="seu usuário" autocomplete="username">
     <label>Senha</label>
