@@ -9,8 +9,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{
     --bg:#0f1417; --surface:#171e23; --surface-2:#20282e; --line:#2a333a;
@@ -677,15 +675,17 @@ screens.adminFuncionarioForm = () => {
       <button type="button" class="btn btn-outline" style="padding:0 16px; margin-top:0;" onclick="buscarCep()">Buscar CEP</button>
     </div>
     <input id="fEndereco" value="${f ? (f.endereco_texto||'') : ''}" placeholder="Rua, número, bairro, cidade">
-    <button type="button" class="btn btn-outline" style="margin-top:6px; margin-bottom:4px;" onclick="buscarCoordenadas()">🔍 Achar no mapa</button>
-    <div id="enderecoResultado" class="muted-small" style="margin-bottom:10px">${f && f.latitude != null ? '📍 Localização já salva — confira o pino no mapa' : 'Busque pelo CEP ou endereço, depois arraste o pino pro local exato'}</div>
-    <div id="mapaEndereco" style="height:260px; border-radius:12px; margin-bottom:6px; overflow:hidden; background:var(--surface-2);"></div>
-    <div class="muted-small" style="margin-bottom:12px">Arraste o pino no mapa até o ponto exato antes de salvar — é isso que vale, não o texto do endereço.</div>
-    <input type="hidden" id="fLat" value="${f && f.latitude != null ? f.latitude : ''}">
-    <input type="hidden" id="fLng" value="${f && f.longitude != null ? f.longitude : ''}">
+    <button type="button" class="btn btn-outline" style="margin-top:6px; margin-bottom:4px;" onclick="buscarCoordenadas()">🔍 Achar localização</button>
+    <div id="enderecoResultado" class="muted-small" style="margin-bottom:12px">${f && f.latitude != null ? '📍 Localização já salva — confira no Google Maps' : 'Busque pelo CEP ou endereço, depois confira no Google Maps'}</div>
+    <div class="select-row" style="margin-bottom:6px">
+      <input id="fLat" type="number" step="0.000001" value="${f && f.latitude != null ? f.latitude : ''}" placeholder="Latitude">
+      <input id="fLng" type="number" step="0.000001" value="${f && f.longitude != null ? f.longitude : ''}" placeholder="Longitude">
+    </div>
+    <button type="button" class="btn btn-outline" style="margin-bottom:4px" onclick="conferirNoGoogleMaps()">📍 Conferir no Google Maps</button>
+    <div class="muted-small" style="margin-bottom:12px">Abre o local numa aba nova. Se não for o lugar certo, ajusta os números de Latitude e Longitude ali em cima (no Google Maps, clique com o botão direito no ponto certo pra copiar as coordenadas) e clica em "Conferir" de novo.</div>
     <label>Raio permitido (metros)</label>
     <input id="fRaio" type="number" value="${f ? (f.raio_metros||50) : 50}" min="10" max="1000">
-    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se não colocar um pino no mapa, ela pode bater ponto pelo celular de qualquer lugar.</div>
+    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se deixar Latitude/Longitude em branco, ela pode bater ponto pelo celular de qualquer lugar.</div>
     <label>Jornada diária (horas)</label><input id="fJornada" type="number" step="0.5" value="${f ? (f.jornada_diaria_horas||8) : 8}">
     <label>Valor da hora (R$, opcional)</label><input id="fValorHora" type="number" step="0.01" value="${f ? (f.valor_hora||'') : ''}" placeholder="opcional">
     <label>Dias de folga fixa</label>
@@ -694,58 +694,11 @@ screens.adminFuncionarioForm = () => {
     ${id ? `<div class="muted-small">Salvar aqui também desbloqueia o PIN e a senha, caso estivessem bloqueados.</div>` : ''}`;
 };
 
-/* ---------------------------------------------------------------------
-   Mapa arrastável pra marcar a localização exata (mais confiável que
-   confiar cegamente na busca por texto)
---------------------------------------------------------------------- */
-let mapaFuncionario = null;
-let marcadorFuncionario = null;
-
-function initMapaEndereco() {
-  const el = document.getElementById('mapaEndereco');
-  if (!el) return;
-  if (typeof L === 'undefined') {
-    el.innerHTML = '<div style="padding:16px; color:var(--muted); font-size:13px;">O mapa não carregou (sem conexão com o serviço do mapa). Você ainda pode preencher o endereço e o CEP normalmente, e usar "Achar no mapa" de novo depois.</div>';
-    return;
-  }
-  const latInicial = parseFloat(document.getElementById('fLat').value) || -22.9068;
-  const lngInicial = parseFloat(document.getElementById('fLng').value) || -43.1729;
-  const temPino = !!document.getElementById('fLat').value;
-  if (mapaFuncionario) { mapaFuncionario.remove(); mapaFuncionario = null; }
-  mapaFuncionario = L.map('mapaEndereco').setView([latInicial, lngInicial], temPino ? 17 : 12);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap', maxZoom: 19
-  }).addTo(mapaFuncionario);
-  delete L.Icon.Default.prototype._getIconUrl;
-  L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png',
-    shadowUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png'
-  });
-  marcadorFuncionario = L.marker([latInicial, lngInicial], { draggable: true }).addTo(mapaFuncionario);
-  marcadorFuncionario.on('dragend', () => {
-    const pos = marcadorFuncionario.getLatLng();
-    document.getElementById('fLat').value = pos.lat;
-    document.getElementById('fLng').value = pos.lng;
-    document.getElementById('enderecoResultado').textContent = '📍 Pino ajustado manualmente — essa é a localização que vai valer.';
-  });
-  mapaFuncionario.on('click', e => {
-    marcadorFuncionario.setLatLng(e.latlng);
-    document.getElementById('fLat').value = e.latlng.lat;
-    document.getElementById('fLng').value = e.latlng.lng;
-    document.getElementById('enderecoResultado').textContent = '📍 Pino ajustado manualmente — essa é a localização que vai valer.';
-  });
-  setTimeout(() => mapaFuncionario.invalidateSize(), 200);
-}
-
-function moverMapaPara(lat, lng, zoom) {
-  document.getElementById('fLat').value = lat;
-  document.getElementById('fLng').value = lng;
-  if (!mapaFuncionario && typeof L !== 'undefined') initMapaEndereco();
-  if (mapaFuncionario && marcadorFuncionario) {
-    mapaFuncionario.setView([lat, lng], zoom || 17);
-    marcadorFuncionario.setLatLng([lat, lng]);
-  }
+function conferirNoGoogleMaps() {
+  const lat = document.getElementById('fLat').value;
+  const lng = document.getElementById('fLng').value;
+  if (!lat || !lng) return showToast('Preencha Latitude e Longitude primeiro (ou busque pelo CEP/endereço)');
+  window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
 }
 
 async function buscarCep() {
@@ -773,9 +726,10 @@ async function buscarCoordenadas() {
   try {
     const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(endereco)}`);
     const data = await resp.json();
-    if (!data || !data.length) { resultadoEl.textContent = '❌ Não achei esse endereço no mapa — ajuste o pino manualmente clicando no mapa.'; return; }
-    moverMapaPara(parseFloat(data[0].lat), parseFloat(data[0].lon));
-    resultadoEl.textContent = '📍 Encontrado perto de: ' + data[0].display_name + ' — confira e arraste o pino se precisar ajustar.';
+    if (!data || !data.length) { resultadoEl.textContent = '❌ Não achei automaticamente. Preencha Latitude e Longitude manualmente (busque o local no Google Maps, clique com o botão direito no ponto certo e copie os números).'; return; }
+    document.getElementById('fLat').value = data[0].lat;
+    document.getElementById('fLng').value = data[0].lon;
+    resultadoEl.textContent = '📍 Encontrado perto de: ' + data[0].display_name + ' — clique em "Conferir no Google Maps" pra confirmar.';
   } catch (e) {
     resultadoEl.textContent = '❌ Erro ao buscar: ' + e.message;
   }
@@ -1156,7 +1110,6 @@ function goTo(screen) {
   if (screen === 'kioskPunch') loadPunchGrid(state.selectedFuncionario.id, 'loja');
   if (screen === 'personalPunch') loadPunchGrid(state.personalUser.id, 'pessoal');
   if (screen === 'adminDayEdit') carregarCamposDia(state.adminEditDay.funcId, state.adminEditDay.dataKey);
-  if (screen === 'adminFuncionarioForm') setTimeout(initMapaEndereco, 50);
 }
 
 function selectFuncionaria(id) { state.selectedFuncionario = state.funcionarios.find(f => f.id === id); state.pin = ''; state.pinVisivel = false; goTo('kioskPin'); }
