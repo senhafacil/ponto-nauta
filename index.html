@@ -119,6 +119,30 @@ const SUPABASE_URL = 'https://kzsospnvnrotgpquvliy.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_D9fMdHocNzz_nkwhUmrwhw_6ifM0AUE';
 const ADMIN_PASSWORD = '@Matheus2023';
 
+/* ---------------------------------------------------------------------
+   Localização exigida pra bater ponto pelo celular pessoal.
+   Agora é configurada por funcionária, direto no painel admin (endereço
+   + raio em metros) — não precisa mexer em código pra isso.
+--------------------------------------------------------------------- */
+function calcularDistanciaMetros(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function obterLocalizacao() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) return resolve({ ok: false, erro: 'Seu navegador não suporta localização.' });
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ ok: true, lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve({ ok: false, erro: 'Não deu pra pegar sua localização. Verifique se a permissão de localização está liberada pro navegador.' }),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
+}
+
 const sb = (SUPABASE_URL.startsWith('http'))
   ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
@@ -502,8 +526,22 @@ async function loadPunchGrid(funcionarioId, dispositivo) {
   }).join('');
 }
 
-function confirmarPunch(funcionarioId, tipo, dispositivo) {
+async function confirmarPunch(funcionarioId, tipo, dispositivo) {
   const tipoInfo = TIPOS.find(t => t.key === tipo);
+  if (dispositivo === 'pessoal') {
+    const func = state.personalUser;
+    if (func && func.latitude != null && func.longitude != null) {
+      showToast('Verificando localização...');
+      const loc = await obterLocalizacao();
+      if (!loc.ok) { showToast('❌ ' + loc.erro); return; }
+      const raio = func.raio_metros || 50;
+      const dist = Math.round(calcularDistanciaMetros(loc.lat, loc.lng, func.latitude, func.longitude));
+      if (dist > raio) {
+        showToast(`❌ Você está a ${dist}m do endereço liberado — só dá pra bater o ponto até ${raio}m de distância.`);
+        return;
+      }
+    }
+  }
   const modal = document.createElement('div');
   modal.className = 'feedback';
   modal.id = 'confirmPunchModal';
@@ -630,6 +668,15 @@ screens.adminFuncionarioForm = () => {
     <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Só números — é o que ela vai digitar no teclado do ponto da loja.</div>
     <label>Usuário (celular pessoal)</label><input id="fUsuario" value="${f ? (f.usuario||'') : ''}" placeholder="usuario">
     <label>Senha (celular pessoal)</label><input id="fSenha" value="${f ? (f.senha||'') : ''}" placeholder="senha">
+    <label>Endereço liberado pra bater ponto pelo celular (opcional)</label>
+    <input id="fEndereco" value="${f ? (f.endereco_texto||'') : ''}" placeholder="Rua, número, bairro, cidade">
+    <button type="button" class="btn btn-outline" style="margin-top:6px; margin-bottom:4px;" onclick="buscarCoordenadas()">🔍 Buscar esse endereço</button>
+    <div id="enderecoResultado" class="muted-small" style="margin-bottom:10px">${f && f.latitude != null ? '📍 Localização já salva pra essa funcionária' : 'Digite o endereço e clique em buscar antes de salvar'}</div>
+    <input type="hidden" id="fLat" value="${f && f.latitude != null ? f.latitude : ''}">
+    <input type="hidden" id="fLng" value="${f && f.longitude != null ? f.longitude : ''}">
+    <label>Raio permitido (metros)</label>
+    <input id="fRaio" type="number" value="${f ? (f.raio_metros||50) : 50}" min="10" max="1000">
+    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se não preencher o endereço, ela pode bater ponto pelo celular de qualquer lugar.</div>
     <label>Jornada diária (horas)</label><input id="fJornada" type="number" step="0.5" value="${f ? (f.jornada_diaria_horas||8) : 8}">
     <label>Valor da hora (R$, opcional)</label><input id="fValorHora" type="number" step="0.01" value="${f ? (f.valor_hora||'') : ''}" placeholder="opcional">
     <label>Dias de folga fixa</label>
@@ -637,6 +684,23 @@ screens.adminFuncionarioForm = () => {
     <button class="btn btn-primary" onclick="salvarFuncionaria('${id||''}')">${id ? 'Salvar alterações' : 'Cadastrar'}</button>
     ${id ? `<div class="muted-small">Salvar aqui também desbloqueia o PIN e a senha, caso estivessem bloqueados.</div>` : ''}`;
 };
+
+async function buscarCoordenadas() {
+  const endereco = document.getElementById('fEndereco').value.trim();
+  if (!endereco) return showToast('Digite o endereço primeiro');
+  const resultadoEl = document.getElementById('enderecoResultado');
+  resultadoEl.textContent = 'Buscando...';
+  try {
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(endereco)}`);
+    const data = await resp.json();
+    if (!data || !data.length) { resultadoEl.textContent = '❌ Endereço não encontrado — tente incluir cidade e bairro.'; return; }
+    document.getElementById('fLat').value = data[0].lat;
+    document.getElementById('fLng').value = data[0].lon;
+    resultadoEl.textContent = '📍 ' + data[0].display_name;
+  } catch (e) {
+    resultadoEl.textContent = '❌ Erro ao buscar: ' + e.message;
+  }
+}
 
 async function salvarFuncionaria(id) {
   if (!sb) return showToast('Configure o Supabase antes de cadastrar');
@@ -654,6 +718,10 @@ async function salvarFuncionaria(id) {
     valor_hora: parseFloat(document.getElementById('fValorHora').value) || null,
     dias_folga: diasFolga,
     dispositivo_permitido: document.getElementById('fDispositivo').value,
+    endereco_texto: document.getElementById('fEndereco').value.trim() || null,
+    latitude: document.getElementById('fLat').value ? parseFloat(document.getElementById('fLat').value) : null,
+    longitude: document.getElementById('fLng').value ? parseFloat(document.getElementById('fLng').value) : null,
+    raio_metros: parseInt(document.getElementById('fRaio').value) || 50,
     ativo: true,
     pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false
   };
