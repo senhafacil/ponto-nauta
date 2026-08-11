@@ -669,23 +669,14 @@ screens.adminFuncionarioForm = () => {
     <label>Usuário (celular pessoal)</label><input id="fUsuario" value="${f ? (f.usuario||'') : ''}" placeholder="usuario">
     <label>Senha (celular pessoal)</label><input id="fSenha" value="${f ? (f.senha||'') : ''}" placeholder="senha">
 
-    <label>Endereço liberado pra bater ponto pelo celular (opcional)</label>
-    <div class="select-row" style="margin-bottom:10px">
-      <input id="fCep" placeholder="CEP (00000-000)" style="max-width:160px; margin-bottom:0;">
-      <button type="button" class="btn btn-outline" style="padding:0 16px; margin-top:0;" onclick="buscarCep()">Buscar CEP</button>
-    </div>
+    <label>Endereço da casa dela, onde ela pode bater ponto pelo celular (opcional)</label>
     <input id="fEndereco" value="${f ? (f.endereco_texto||'') : ''}" placeholder="Rua, número, bairro, cidade">
-    <button type="button" class="btn btn-outline" style="margin-top:6px; margin-bottom:4px;" onclick="buscarCoordenadas()">🔍 Achar localização</button>
-    <div id="enderecoResultado" class="muted-small" style="margin-bottom:12px">${f && f.latitude != null ? '📍 Localização já salva — confira no Google Maps' : 'Busque pelo CEP ou endereço, depois confira no Google Maps'}</div>
-    <div class="select-row" style="margin-bottom:6px">
-      <input id="fLat" type="number" step="0.000001" value="${f && f.latitude != null ? f.latitude : ''}" placeholder="Latitude">
-      <input id="fLng" type="number" step="0.000001" value="${f && f.longitude != null ? f.longitude : ''}" placeholder="Longitude">
-    </div>
-    <button type="button" class="btn btn-outline" style="margin-bottom:4px" onclick="conferirNoGoogleMaps()">📍 Conferir no Google Maps</button>
-    <div class="muted-small" style="margin-bottom:12px">Abre o local numa aba nova. Se não for o lugar certo, ajusta os números de Latitude e Longitude ali em cima (no Google Maps, clique com o botão direito no ponto certo pra copiar as coordenadas) e clica em "Conferir" de novo.</div>
+    <div class="muted-small" style="margin-top:-8px; margin-bottom:10px;">${f && f.latitude != null ? `📍 Localização já registrada (${f.latitude}, ${f.longitude})` : 'Ao salvar, o sistema já localiza esse endereço sozinho.'}</div>
+    <input type="hidden" id="fLat" value="${f && f.latitude != null ? f.latitude : ''}">
+    <input type="hidden" id="fLng" value="${f && f.longitude != null ? f.longitude : ''}">
     <label>Raio permitido (metros)</label>
     <input id="fRaio" type="number" value="${f ? (f.raio_metros||50) : 50}" min="10" max="1000">
-    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se deixar Latitude/Longitude em branco, ela pode bater ponto pelo celular de qualquer lugar.</div>
+    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se deixar o endereço em branco, ela pode bater ponto pelo celular de qualquer lugar.</div>
     <label>Jornada diária (horas)</label><input id="fJornada" type="number" step="0.5" value="${f ? (f.jornada_diaria_horas||8) : 8}">
     <label>Valor da hora (R$, opcional)</label><input id="fValorHora" type="number" step="0.01" value="${f ? (f.valor_hora||'') : ''}" placeholder="opcional">
     <label>Dias de folga fixa</label>
@@ -694,45 +685,15 @@ screens.adminFuncionarioForm = () => {
     ${id ? `<div class="muted-small">Salvar aqui também desbloqueia o PIN e a senha, caso estivessem bloqueados.</div>` : ''}`;
 };
 
-function conferirNoGoogleMaps() {
-  const lat = document.getElementById('fLat').value;
-  const lng = document.getElementById('fLng').value;
-  if (!lat || !lng) return showToast('Preencha Latitude e Longitude primeiro (ou busque pelo CEP/endereço)');
-  window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
-}
-
-async function buscarCep() {
-  const cepDigits = document.getElementById('fCep').value.replace(/\D/g, '');
-  if (cepDigits.length !== 8) return showToast('Digite um CEP válido (8 números)');
-  const resultadoEl = document.getElementById('enderecoResultado');
-  resultadoEl.textContent = 'Buscando CEP...';
+async function geocodificarSeNecessario(enderecoNovo, latAtual, lngAtual, enderecoAntigo) {
+  if (!enderecoNovo) return { lat: null, lng: null };
+  if (enderecoNovo === enderecoAntigo && latAtual) return { lat: latAtual, lng: lngAtual };
   try {
-    const resp = await fetch(`https://viacep.com.br/ws/${cepDigits}/json/`);
+    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(enderecoNovo)}`);
     const data = await resp.json();
-    if (data.erro) { resultadoEl.textContent = '❌ CEP não encontrado.'; return; }
-    const enderecoMontado = `${data.logradouro || ''}, ${data.bairro || ''}, ${data.localidade || ''} - ${data.uf || ''}`.replace(/^, |, $/g, '');
-    document.getElementById('fEndereco').value = enderecoMontado;
-    resultadoEl.textContent = 'CEP encontrado — clique em "Achar no mapa" pra localizar.';
-  } catch (e) {
-    resultadoEl.textContent = '❌ Erro ao buscar CEP: ' + e.message;
-  }
-}
-
-async function buscarCoordenadas() {
-  const endereco = document.getElementById('fEndereco').value.trim();
-  if (!endereco) return showToast('Digite o endereço ou busque pelo CEP primeiro');
-  const resultadoEl = document.getElementById('enderecoResultado');
-  resultadoEl.textContent = 'Buscando...';
-  try {
-    const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=${encodeURIComponent(endereco)}`);
-    const data = await resp.json();
-    if (!data || !data.length) { resultadoEl.textContent = '❌ Não achei automaticamente. Preencha Latitude e Longitude manualmente (busque o local no Google Maps, clique com o botão direito no ponto certo e copie os números).'; return; }
-    document.getElementById('fLat').value = data[0].lat;
-    document.getElementById('fLng').value = data[0].lon;
-    resultadoEl.textContent = '📍 Encontrado perto de: ' + data[0].display_name + ' — clique em "Conferir no Google Maps" pra confirmar.';
-  } catch (e) {
-    resultadoEl.textContent = '❌ Erro ao buscar: ' + e.message;
-  }
+    if (data && data.length) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+  } catch (e) { /* segue sem localização */ }
+  return { lat: null, lng: null };
 }
 
 async function salvarFuncionaria(id) {
@@ -742,6 +703,10 @@ async function salvarFuncionaria(id) {
   const pin = document.getElementById('fPin').value.trim();
   if (pin && !/^\d{4}$/.test(pin)) return showToast('O PIN precisa ter exatamente 4 números (0 a 9), sem letras');
   const diasFolga = WEEKDAYS.map((_, i) => i).filter(i => document.getElementById('folga'+i).checked);
+  const enderecoNovo = document.getElementById('fEndereco').value.trim();
+  const fAtual = id ? (state.adminFuncionariosAll || []).find(x => x.id === id) : null;
+  let { lat, lng } = await geocodificarSeNecessario(enderecoNovo, fAtual && fAtual.latitude, fAtual && fAtual.longitude, fAtual && fAtual.endereco_texto);
+  if (enderecoNovo && lat === null) showToast('⚠️ Não achei esse endereço automaticamente — salvando sem localização. Confira se está completo (rua, número, bairro, cidade).');
   const payload = {
     nome,
     pin,
@@ -751,9 +716,9 @@ async function salvarFuncionaria(id) {
     valor_hora: parseFloat(document.getElementById('fValorHora').value) || null,
     dias_folga: diasFolga,
     dispositivo_permitido: document.getElementById('fDispositivo').value,
-    endereco_texto: document.getElementById('fEndereco').value.trim() || null,
-    latitude: document.getElementById('fLat').value ? parseFloat(document.getElementById('fLat').value) : null,
-    longitude: document.getElementById('fLng').value ? parseFloat(document.getElementById('fLng').value) : null,
+    endereco_texto: enderecoNovo || null,
+    latitude: lat,
+    longitude: lng,
     raio_metros: parseInt(document.getElementById('fRaio').value) || 50,
     ativo: true,
     pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false
