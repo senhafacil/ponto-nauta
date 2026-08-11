@@ -9,8 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{
     --bg:#0f1417; --surface:#171e23; --surface-2:#20282e; --line:#2a333a;
@@ -703,7 +703,11 @@ let marcadorFuncionario = null;
 
 function initMapaEndereco() {
   const el = document.getElementById('mapaEndereco');
-  if (!el || typeof L === 'undefined') return;
+  if (!el) return;
+  if (typeof L === 'undefined') {
+    el.innerHTML = '<div style="padding:16px; color:var(--muted); font-size:13px;">O mapa não carregou (sem conexão com o serviço do mapa). Você ainda pode preencher o endereço e o CEP normalmente, e usar "Achar no mapa" de novo depois.</div>';
+    return;
+  }
   const latInicial = parseFloat(document.getElementById('fLat').value) || -22.9068;
   const lngInicial = parseFloat(document.getElementById('fLng').value) || -43.1729;
   const temPino = !!document.getElementById('fLat').value;
@@ -714,9 +718,9 @@ function initMapaEndereco() {
   }).addTo(mapaFuncionario);
   delete L.Icon.Default.prototype._getIconUrl;
   L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
+    iconRetinaUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/images/marker-shadow.png'
   });
   marcadorFuncionario = L.marker([latInicial, lngInicial], { draggable: true }).addTo(mapaFuncionario);
   marcadorFuncionario.on('dragend', () => {
@@ -737,6 +741,7 @@ function initMapaEndereco() {
 function moverMapaPara(lat, lng, zoom) {
   document.getElementById('fLat').value = lat;
   document.getElementById('fLng').value = lng;
+  if (!mapaFuncionario && typeof L !== 'undefined') initMapaEndereco();
   if (mapaFuncionario && marcadorFuncionario) {
     mapaFuncionario.setView([lat, lng], zoom || 17);
     marcadorFuncionario.setLatLng([lat, lng]);
