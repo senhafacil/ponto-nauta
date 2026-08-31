@@ -1092,34 +1092,45 @@ function gerarPdfExtrato(d) {
   doc.line(margem, y, 555, y);
   y += 16;
 
-  // Uma linha por batida individual (não agrupado por dia)
+  // Uma linha por dia, com os 4 horários e a extra/devedora daquele dia
   const linhas = [];
+  const cores = [];
   dias.filter(x => x.status !== 'futuro').forEach(x => {
-    const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
-    TIPOS.forEach(t => {
-      const iso = x.byTipo[t.key];
-      if (!iso) return;
-      const dt = new Date(iso);
-      const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const dispositivo = DISPOSITIVO_LABEL[x.byTipoDispositivo[t.key]] || x.byTipoDispositivo[t.key] || '—';
-      linhas.push([dataFmt, t.label, hora, dispositivo]);
-    });
+    const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
+    const horaOuTraco = tipo => {
+      const iso = x.byTipo[tipo];
+      return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
+    };
+    let situacao = '—', cor = [120, 120, 120];
+    if (x.status === 'falta') { situacao = 'Falta'; cor = [192, 57, 43]; }
+    else if (x.status === 'folga') { situacao = 'Folga'; cor = [54, 103, 181]; }
+    else if (x.status === 'feriado' && !x.byTipo.entrada) { situacao = 'Feriado'; cor = [15, 125, 118]; }
+    else if (x.extra > 0) { situacao = '+' + fmtHoras(x.extra) + ' extra'; cor = [184, 119, 15]; }
+    else if (x.deficit > 0) { situacao = '-' + fmtHoras(x.deficit) + ' devendo'; cor = [192, 57, 43]; }
+    linhas.push([dataFmt, horaOuTraco('entrada'), horaOuTraco('saida_almoco'), horaOuTraco('volta_almoco'), horaOuTraco('saida'), situacao]);
+    cores.push(cor);
   });
 
   doc.autoTable({
     startY: y,
     margin: { left: margem, right: 40 },
-    head: [['Dia', 'Tipo de batida', 'Horário exato', 'Onde bateu']],
-    body: linhas.length ? linhas : [['—', 'Nenhuma batida registrada neste mês', '—', '—']],
-    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6 },
+    head: [['Dia', 'Entrada', 'Saída almoço', 'Volta almoço', 'Saída', 'Extra / Devedora']],
+    body: linhas.length ? linhas : [['—', '—', '—', '—', '—', 'Nenhum registro neste mês']],
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, halign: 'center' },
+    columnStyles: { 0: { halign: 'left' }, 5: { halign: 'left', fontStyle: 'bold' } },
     headStyles: { fillColor: [15, 20, 23], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [248, 249, 250] }
+    alternateRowStyles: { fillColor: [248, 249, 250] },
+    didParseCell: data => {
+      if (data.section === 'body' && data.column.index === 5 && cores[data.row.index]) {
+        data.cell.styles.textColor = cores[data.row.index];
+      }
+    }
   });
 
   let yFinal = doc.lastAutoTable.finalY + 20;
   if (yFinal > 760) { doc.addPage(); yFinal = margem; }
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
-  doc.text(`Total de batidas no mês: ${linhas.length}. Horário com segundos, exatamente como foi registrado. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`, margem, yFinal);
+  doc.text(`Total de dias no período: ${linhas.length}. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`, margem, yFinal);
 
   return doc;
 }
