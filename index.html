@@ -342,8 +342,8 @@ function classificarDia(dataKey, funcionario, punches, isToday) {
   const jornada = (funcionario.jornada_diaria_horas || 8) * 60;
   const temPonto = punches.length > 0;
 
-  const base = { dataKey, weekday, especial, especialManual, trabalhado: 0, extra: 0, deficit: 0, indenizacao: 0, taxaExtra: 1.5, byTipo: {} };
-  punches.forEach(p => { base.byTipo[p.tipo] = p.registrado_em; });
+  const base = { dataKey, weekday, especial, especialManual, trabalhado: 0, extra: 0, deficit: 0, indenizacao: 0, taxaExtra: 1.5, byTipo: {}, byTipoDispositivo: {} };
+  punches.forEach(p => { base.byTipo[p.tipo] = p.registrado_em; base.byTipoDispositivo[p.tipo] = p.dispositivo; });
 
   if (!temPonto) {
     if (especial === 'feriado') return { ...base, status: 'feriado' };
@@ -938,7 +938,8 @@ async function carregarRelatorio() {
     <div class="muted-small">Jornada: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · extra normal +50%, feriado trabalhado +100% ·
     intervalo obrigatório 1h (jornada &gt;6h) ou 15min (&gt;4h), tolerância de ${TOLERANCIA_MIN}min · intervalo suprimido além da tolerância gera indenização de 1,5x (não é hora extra, não reflete em FGTS/13º/férias) ·
     dias marcados como folga compensada/abono não geram débito. Ajuste feriados, folgas e abonos na tela de Acompanhamento diário.</div>
-    <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar PDF</button>`;
+    <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar relatório (resumo)</button>
+    <button class="btn btn-outline" style="margin-top:10px" onclick="baixarExtratoPDF()">📋 Baixar extrato de batidas (todas as horas)</button>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -1062,6 +1063,73 @@ function baixarRelatorioPDF() {
   try {
     const doc = gerarPdfRelatorio(d);
     const nomeArquivo = `ponto-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
+    doc.save(nomeArquivo);
+  } catch (e) {
+    showToast('Erro ao gerar PDF: ' + e.message);
+  }
+}
+
+const DISPOSITIVO_LABEL = { loja: 'Loja', pessoal: 'Celular', admin: 'Ajuste manual' };
+
+function gerarPdfExtrato(d) {
+  const { func, ano, mes, dias } = d;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const mesNome = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes];
+  const margem = 40;
+  let y = margem;
+
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(15, 20, 23);
+  doc.text('Ponto Nauta', margem, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+  doc.text('Extrato de batidas — todos os registros do mês', margem, y + 14);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  doc.text(func.nome, 555, y, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+  doc.text(`${mesNome} de ${ano}`, 555, y + 14, { align: 'right' });
+  y += 26;
+  doc.setDrawColor(58, 166, 160); doc.setLineWidth(2);
+  doc.line(margem, y, 555, y);
+  y += 16;
+
+  // Uma linha por batida individual (não agrupado por dia)
+  const linhas = [];
+  dias.filter(x => x.status !== 'futuro').forEach(x => {
+    const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+    TIPOS.forEach(t => {
+      const iso = x.byTipo[t.key];
+      if (!iso) return;
+      const dt = new Date(iso);
+      const hora = dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const dispositivo = DISPOSITIVO_LABEL[x.byTipoDispositivo[t.key]] || x.byTipoDispositivo[t.key] || '—';
+      linhas.push([dataFmt, t.label, hora, dispositivo]);
+    });
+  });
+
+  doc.autoTable({
+    startY: y,
+    margin: { left: margem, right: 40 },
+    head: [['Dia', 'Tipo de batida', 'Horário exato', 'Onde bateu']],
+    body: linhas.length ? linhas : [['—', 'Nenhuma batida registrada neste mês', '—', '—']],
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6 },
+    headStyles: { fillColor: [15, 20, 23], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 249, 250] }
+  });
+
+  let yFinal = doc.lastAutoTable.finalY + 20;
+  if (yFinal > 760) { doc.addPage(); yFinal = margem; }
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
+  doc.text(`Total de batidas no mês: ${linhas.length}. Horário com segundos, exatamente como foi registrado. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`, margem, yFinal);
+
+  return doc;
+}
+
+function baixarExtratoPDF() {
+  const d = state.ultimoRelatorio;
+  if (!d) return showToast('Gere o relatório primeiro');
+  try {
+    const doc = gerarPdfExtrato(d);
+    const nomeArquivo = `extrato-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
     doc.save(nomeArquivo);
   } catch (e) {
     showToast('Erro ao gerar PDF: ' + e.message);
