@@ -939,7 +939,7 @@ async function carregarRelatorio() {
     intervalo obrigatório 1h (jornada &gt;6h) ou 15min (&gt;4h), tolerância de ${TOLERANCIA_MIN}min · intervalo suprimido além da tolerância gera indenização de 1,5x (não é hora extra, não reflete em FGTS/13º/férias) ·
     dias marcados como folga compensada/abono não geram débito. Ajuste feriados, folgas e abonos na tela de Acompanhamento diário.</div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar relatório (resumo)</button>
-    <button class="btn btn-outline" style="margin-top:10px" onclick="baixarExtratoPDF()">📋 Baixar extrato de batidas (todas as horas)</button>`;
+    <button class="btn btn-outline" style="margin-top:10px" onclick="baixarExtratoPDF()">📋 Baixar Extrato Acompanhamento Diário</button>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -1082,7 +1082,7 @@ function gerarPdfExtrato(d) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(15, 20, 23);
   doc.text('Ponto Nauta', margem, y);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
-  doc.text('Extrato de batidas — todos os registros do mês', margem, y + 14);
+  doc.text('Extrato Acompanhamento Diário — todos os registros do mês', margem, y + 14);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
   doc.text(func.nome, 555, y, { align: 'right' });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
@@ -1129,7 +1129,7 @@ function baixarExtratoPDF() {
   if (!d) return showToast('Gere o relatório primeiro');
   try {
     const doc = gerarPdfExtrato(d);
-    const nomeArquivo = `extrato-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
+    const nomeArquivo = `extrato-acompanhamento-diario-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
     doc.save(nomeArquivo);
   } catch (e) {
     showToast('Erro ao gerar PDF: ' + e.message);
