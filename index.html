@@ -8,7 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --bg:#0f1417; --surface:#171e23; --surface-2:#20282e; --line:#2a333a;
@@ -107,7 +108,6 @@
 </head>
 <body>
 <div class="app" id="app"></div>
-<div id="pdfRoot" style="position:fixed; left:0; top:0; z-index:9999; background:#fff; display:none;"></div>
 
 <script>
 /* ======================================================================
@@ -942,122 +942,130 @@ async function carregarRelatorio() {
 }
 
 /* ---------------------------------------------------------------------
-   Exportar relatório em PDF — layout claro, com legenda de cores
+   Exportar relatório em PDF — desenhado diretamente com jsPDF (não tira
+   "foto" da tela, então não depende de fontes/tempo de carregamento e
+   não sai em branco).
 --------------------------------------------------------------------- */
 const STATUS_PDF_META = {
-  completo:   { label: 'Completo',      cor: '#1f9d63', bg: '#e8f8f0' },
-  andamento:  { label: 'Em andamento',  cor: '#b8770f', bg: '#fdf3e2' },
-  incompleto: { label: 'Incompleto',    cor: '#c0392b', bg: '#fceceb' },
-  falta:      { label: 'Não bateu',     cor: '#c0392b', bg: '#fceceb' },
-  pendente:   { label: 'Aguardando',    cor: '#7a8894', bg: '#f1f3f4' },
-  folga:      { label: 'Folga',         cor: '#3667b5', bg: '#eaf0fb' },
-  feriado:    { label: 'Feriado',       cor: '#0f7d76', bg: '#e4f6f4' },
-  futuro:     { label: '—',             cor: '#c8ced3', bg: '#ffffff' }
+  completo:   { label: 'Completo',      cor: [31,157,99],   bg: [232,248,240] },
+  andamento:  { label: 'Em andamento',  cor: [184,119,15],  bg: [253,243,226] },
+  incompleto: { label: 'Incompleto',    cor: [192,57,43],   bg: [252,236,235] },
+  falta:      { label: 'Não bateu',     cor: [192,57,43],   bg: [252,236,235] },
+  pendente:   { label: 'Aguardando',    cor: [122,136,148], bg: [241,243,244] },
+  folga:      { label: 'Folga',         cor: [54,103,181],  bg: [234,240,251] },
+  feriado:    { label: 'Feriado',       cor: [15,125,118],  bg: [228,246,244] },
+  futuro:     { label: '—',             cor: [200,206,211], bg: [255,255,255] }
 };
 
-function buildPdfHtml(d) {
-  const { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, valorIndenizacao, saldoMin, bannerTxt } = d;
+function gerarPdfRelatorio(d) {
+  const { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, bannerTxt } = d;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const mesNome = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes];
-  const legendaHtml = Object.entries(STATUS_PDF_META).filter(([k]) => k !== 'futuro').map(([k, m]) => `
-    <span style="display:inline-flex; align-items:center; gap:5px; margin-right:16px; margin-bottom:6px; font-size:11px; color:#333;">
-      <span style="width:10px; height:10px; border-radius:50%; background:${m.cor}; display:inline-block;"></span>${m.label}
-    </span>`).join('');
-  const linhasHtml = dias.filter(x => x.status !== 'futuro').map(x => {
-    const meta = STATUS_PDF_META[x.status] || STATUS_PDF_META.pendente;
+  const margem = 40;
+  let y = margem;
+
+  // Cabeçalho
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(15, 20, 23);
+  doc.text('Ponto Nauta', margem, y);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+  doc.text('Relatório mensal de ponto', margem, y + 14);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  doc.text(func.nome, 555, y, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
+  doc.text(`${mesNome} de ${ano}`, 555, y + 14, { align: 'right' });
+  y += 26;
+  doc.setDrawColor(58, 166, 160); doc.setLineWidth(2);
+  doc.line(margem, y, 555, y);
+  y += 22;
+
+  // Banner-resumo
+  doc.setFillColor(244, 244, 244);
+  const bannerLinhas = doc.splitTextToSize(bannerTxt, 495);
+  const bannerAltura = bannerLinhas.length * 13 + 16;
+  doc.roundedRect(margem, y, 515, bannerAltura, 4, 4, 'F');
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(15, 20, 23);
+  doc.text(bannerLinhas, margem + 12, y + 18);
+  y += bannerAltura + 18;
+
+  // Caixas de resumo
+  const caixas = [
+    { label: 'TRABALHADAS', valor: fmtHoras(r.trabalhado), cor: [15, 20, 23], bg: [248, 249, 250], borda: [226, 226, 226] },
+    { label: 'EXTRAS', valor: fmtHoras(totalExtraH), cor: [184, 119, 15], bg: [253, 243, 226], borda: [240, 223, 184] },
+    { label: 'DEVEDORAS', valor: fmtHoras(r.deficit), cor: [192, 57, 43], bg: [252, 236, 235], borda: [240, 198, 193] }
+  ];
+  if (valorHora) caixas.push({ label: 'VALOR EXTRAS', valor: 'R$ ' + valorExtras.toFixed(2), cor: [31, 157, 99], bg: [232, 248, 240], borda: [191, 232, 212] });
+  const larguraCaixa = (515 - (caixas.length - 1) * 10) / caixas.length;
+  caixas.forEach((c, i) => {
+    const cx = margem + i * (larguraCaixa + 10);
+    doc.setFillColor(...c.bg); doc.setDrawColor(...c.borda); doc.setLineWidth(1);
+    doc.roundedRect(cx, y, larguraCaixa, 46, 4, 4, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(...c.cor);
+    doc.text(c.valor, cx + 10, y + 22);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+    doc.text(c.label, cx + 10, y + 36);
+  });
+  y += 46 + 20;
+
+  // Legenda de cores
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  let lx = margem;
+  Object.entries(STATUS_PDF_META).filter(([k]) => k !== 'futuro').forEach(([k, m]) => {
+    doc.setFillColor(...m.cor);
+    doc.circle(lx + 3, y - 3, 3, 'F');
+    doc.setTextColor(60, 60, 60);
+    doc.text(m.label, lx + 10, y);
+    lx += doc.getTextWidth(m.label) + 26;
+  });
+  y += 16;
+
+  // Tabela dia a dia
+  const linhas = dias.filter(x => x.status !== 'futuro').map(x => {
     const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
     const ferNome = x.especial === 'feriado' ? (nomeFeriado(x.dataKey) || '') : '';
-    return `<tr style="background:${meta.bg};">
-      <td style="padding:7px 8px; border-bottom:1px solid #e2e2e2;">${dataFmt}</td>
-      <td style="padding:7px 8px; border-bottom:1px solid #e2e2e2; color:${meta.cor}; font-weight:600;">${meta.label}${ferNome ? ' · ' + ferNome : ''}</td>
-      <td style="padding:7px 8px; border-bottom:1px solid #e2e2e2; text-align:right;">${x.trabalhado ? fmtHoras(x.trabalhado) : '—'}</td>
-      <td style="padding:7px 8px; border-bottom:1px solid #e2e2e2; text-align:right; color:#b8770f; font-weight:600;">${x.extra > 0 ? fmtHoras(x.extra) : '—'}</td>
-      <td style="padding:7px 8px; border-bottom:1px solid #e2e2e2; text-align:right; color:#c0392b; font-weight:600;">${x.deficit > 0 ? fmtHoras(x.deficit) : '—'}</td>
-    </tr>`;
-  }).join('');
+    const meta = STATUS_PDF_META[x.status] || STATUS_PDF_META.pendente;
+    return {
+      row: [dataFmt, meta.label + (ferNome ? ' · ' + ferNome : ''), x.trabalhado ? fmtHoras(x.trabalhado) : '—', x.extra > 0 ? fmtHoras(x.extra) : '—', x.deficit > 0 ? fmtHoras(x.deficit) : '—'],
+      meta
+    };
+  });
 
-  return `
-  <div style="font-family:Arial,Helvetica,sans-serif; color:#1a1a1a; padding:28px; width:744px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #3aa6a0; padding-bottom:14px; margin-bottom:18px;">
-      <div>
-        <div style="font-size:20px; font-weight:800; color:#0f1417;">Ponto Nauta</div>
-        <div style="font-size:12px; color:#666; margin-top:2px;">Relatório mensal de ponto</div>
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:15px; font-weight:700;">${func.nome}</div>
-        <div style="font-size:12px; color:#666; text-transform:capitalize;">${mesNome} de ${ano}</div>
-      </div>
-    </div>
+  doc.autoTable({
+    startY: y,
+    margin: { left: margem, right: 40 },
+    head: [['Dia', 'Status', 'Trabalhado', 'Extra', 'Devedora']],
+    body: linhas.length ? linhas.map(l => l.row) : [['—', 'Sem registros neste mês', '—', '—', '—']],
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6 },
+    headStyles: { fillColor: [15, 20, 23], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
+    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+    didParseCell: data => {
+      if (data.section === 'body' && linhas[data.row.index]) {
+        const meta = linhas[data.row.index].meta;
+        data.cell.styles.fillColor = meta.bg;
+        if (data.column.index === 1) data.cell.styles.textColor = meta.cor;
+      }
+    }
+  });
 
-    <div style="background:#f4f4f4; border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; font-weight:700; color:#0f1417;">
-      ${bannerTxt}
-    </div>
+  let yFinal = doc.lastAutoTable.finalY + 20;
+  if (yFinal > 760) { doc.addPage(); yFinal = margem; }
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
+  const notaTexto = `Jornada de referência: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · hora extra normal +50%, feriado trabalhado +100% · intervalo obrigatório de 1h (jornada acima de 6h) ou 15min (acima de 4h), com tolerância de ${TOLERANCIA_MIN} minutos · intervalo suprimido além da tolerância gera indenização de 1,5x, de natureza indenizatória (não reflete em FGTS, 13º ou férias) · dias marcados como folga compensada ou abono/atestado não geram débito. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`;
+  doc.text(doc.splitTextToSize(notaTexto, 515), margem, yFinal);
 
-    <div style="display:flex; gap:10px; margin-bottom:16px;">
-      <div style="flex:1; background:#f8f9fa; border:1px solid #e2e2e2; border-radius:8px; padding:10px 12px;">
-        <div style="font-size:18px; font-weight:800;">${fmtHoras(r.trabalhado)}</div>
-        <div style="font-size:10px; color:#777; text-transform:uppercase; letter-spacing:.03em;">Trabalhadas</div>
-      </div>
-      <div style="flex:1; background:#fdf3e2; border:1px solid #f0dfb8; border-radius:8px; padding:10px 12px;">
-        <div style="font-size:18px; font-weight:800; color:#b8770f;">${fmtHoras(totalExtraH)}</div>
-        <div style="font-size:10px; color:#8a6117; text-transform:uppercase; letter-spacing:.03em;">Extras</div>
-      </div>
-      <div style="flex:1; background:#fceceb; border:1px solid #f0c6c1; border-radius:8px; padding:10px 12px;">
-        <div style="font-size:18px; font-weight:800; color:#c0392b;">${fmtHoras(r.deficit)}</div>
-        <div style="font-size:10px; color:#8f2c20; text-transform:uppercase; letter-spacing:.03em;">Devedoras</div>
-      </div>
-      ${valorHora ? `<div style="flex:1; background:#e8f8f0; border:1px solid #bfe8d4; border-radius:8px; padding:10px 12px;">
-        <div style="font-size:18px; font-weight:800; color:#1f9d63;">R$ ${valorExtras.toFixed(2)}</div>
-        <div style="font-size:10px; color:#146942; text-transform:uppercase; letter-spacing:.03em;">Valor extras</div>
-      </div>` : ''}
-    </div>
-
-    <div style="margin-bottom:14px;">${legendaHtml}</div>
-
-    <table style="width:100%; border-collapse:collapse; font-size:11.5px;">
-      <thead>
-        <tr style="background:#0f1417; color:#fff;">
-          <th style="padding:8px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.03em;">Dia</th>
-          <th style="padding:8px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.03em;">Status</th>
-          <th style="padding:8px; text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.03em;">Trabalhado</th>
-          <th style="padding:8px; text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.03em;">Extra</th>
-          <th style="padding:8px; text-align:right; font-size:10px; text-transform:uppercase; letter-spacing:.03em;">Devedora</th>
-        </tr>
-      </thead>
-      <tbody>${linhasHtml || '<tr><td colspan="5" style="padding:16px; text-align:center; color:#999;">Sem registros neste mês</td></tr>'}</tbody>
-    </table>
-
-    <div style="margin-top:18px; font-size:10px; color:#888; line-height:1.6; border-top:1px solid #e2e2e2; padding-top:12px;">
-      Jornada de referência: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · hora extra normal +50%, feriado trabalhado +100% ·
-      intervalo obrigatório de 1h (jornada acima de 6h) ou 15min (acima de 4h), com tolerância de ${TOLERANCIA_MIN} minutos ·
-      intervalo suprimido além da tolerância gera indenização de 1,5x, de natureza indenizatória (não reflete em FGTS, 13º ou férias) ·
-      dias marcados como folga compensada ou abono/atestado não geram débito.
-      Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.
-    </div>
-  </div>`;
+  return doc;
 }
 
-async function baixarRelatorioPDF() {
+function baixarRelatorioPDF() {
   const d = state.ultimoRelatorio;
   if (!d) return showToast('Gere o relatório primeiro');
-  const root = document.getElementById('pdfRoot');
-  root.innerHTML = buildPdfHtml(d);
-  root.style.display = 'block';
-  showToast('Gerando PDF...');
-  // dá tempo do navegador desenhar o conteúdo antes de tirar o "print"
-  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const nomeArquivo = `ponto-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
   try {
-    await html2pdf().set({
-      margin: 0,
-      filename: nomeArquivo,
-      html2canvas: { scale: 2, backgroundColor: '#ffffff', useCORS: true, allowTaint: true, x: 0, y: 0, scrollX: 0, scrollY: 0 },
-      jsPDF: { unit: 'pt', format: 'a4', orientation: 'portrait' }
-    }).from(root).save();
+    const doc = gerarPdfRelatorio(d);
+    const nomeArquivo = `ponto-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
+    doc.save(nomeArquivo);
   } catch (e) {
     showToast('Erro ao gerar PDF: ' + e.message);
   }
-  root.style.display = 'none';
-  root.innerHTML = '';
 }
 
 /* ---------------------------------------------------------------------
