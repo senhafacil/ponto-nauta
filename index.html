@@ -938,8 +938,7 @@ async function carregarRelatorio() {
     <div class="muted-small">Jornada: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · extra normal +50%, feriado trabalhado +100% ·
     intervalo obrigatório 1h (jornada &gt;6h) ou 15min (&gt;4h), tolerância de ${TOLERANCIA_MIN}min · intervalo suprimido além da tolerância gera indenização de 1,5x (não é hora extra, não reflete em FGTS/13º/férias) ·
     dias marcados como folga compensada/abono não geram débito. Ajuste feriados, folgas e abonos na tela de Acompanhamento diário.</div>
-    <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar relatório (resumo)</button>
-    <button class="btn btn-outline" style="margin-top:10px" onclick="baixarExtratoPDF()">📋 Baixar Extrato Acompanhamento Diário</button>`;
+    <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar relatório em PDF</button>`;
 }
 
 /* ---------------------------------------------------------------------
@@ -970,7 +969,7 @@ function gerarPdfRelatorio(d) {
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(15, 20, 23);
   doc.text('Ponto Nauta', margem, y);
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
-  doc.text('Relatório mensal de ponto', margem, y + 14);
+  doc.text('Acompanhamento diário e relatório de horas', margem, y + 14);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
   doc.text(func.nome, 555, y, { align: 'right' });
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
@@ -1020,30 +1019,38 @@ function gerarPdfRelatorio(d) {
   });
   y += 16;
 
-  // Tabela dia a dia
-  const linhas = dias.filter(x => x.status !== 'futuro').map(x => {
+  // Tabela dia a dia — uma linha por dia, com os 4 horários e a extra/devedora
+  const linhas = [];
+  const metas = [];
+  dias.filter(x => x.status !== 'futuro').forEach(x => {
     const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-    const ferNome = x.especial === 'feriado' ? (nomeFeriado(x.dataKey) || '') : '';
-    const meta = STATUS_PDF_META[x.status] || STATUS_PDF_META.pendente;
-    return {
-      row: [dataFmt, meta.label + (ferNome ? ' · ' + ferNome : ''), x.trabalhado ? fmtHoras(x.trabalhado) : '—', x.extra > 0 ? fmtHoras(x.extra) : '—', x.deficit > 0 ? fmtHoras(x.deficit) : '—'],
-      meta
+    const horaOuTraco = tipo => {
+      const iso = x.byTipo[tipo];
+      return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
     };
+    const meta = STATUS_PDF_META[x.status] || STATUS_PDF_META.pendente;
+    let situacao = '—', corSituacao = meta.cor;
+    if (x.status === 'falta') situacao = 'Falta';
+    else if (x.status === 'folga') situacao = 'Folga';
+    else if (x.status === 'feriado' && !x.byTipo.entrada) situacao = 'Feriado';
+    else if (x.extra > 0) { situacao = '+' + fmtHoras(x.extra) + ' extra'; corSituacao = [184, 119, 15]; }
+    else if (x.deficit > 0) { situacao = '-' + fmtHoras(x.deficit) + ' devendo'; corSituacao = [192, 57, 43]; }
+    linhas.push([dataFmt, horaOuTraco('entrada'), horaOuTraco('saida_almoco'), horaOuTraco('volta_almoco'), horaOuTraco('saida'), situacao]);
+    metas.push({ bg: meta.bg, corSituacao });
   });
 
   doc.autoTable({
     startY: y,
     margin: { left: margem, right: 40 },
-    head: [['Dia', 'Status', 'Trabalhado', 'Extra', 'Devedora']],
-    body: linhas.length ? linhas.map(l => l.row) : [['—', 'Sem registros neste mês', '—', '—', '—']],
-    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6 },
+    head: [['Dia', 'Entrada', 'Saída almoço', 'Volta almoço', 'Saída', 'Extra / Devedora']],
+    body: linhas.length ? linhas : [['—', '—', '—', '—', '—', 'Nenhum registro neste mês']],
+    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, halign: 'center' },
+    columnStyles: { 0: { halign: 'left' }, 5: { halign: 'left', fontStyle: 'bold' } },
     headStyles: { fillColor: [15, 20, 23], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
     didParseCell: data => {
-      if (data.section === 'body' && linhas[data.row.index]) {
-        const meta = linhas[data.row.index].meta;
-        data.cell.styles.fillColor = meta.bg;
-        if (data.column.index === 1) data.cell.styles.textColor = meta.cor;
+      if (data.section === 'body' && metas[data.row.index]) {
+        data.cell.styles.fillColor = metas[data.row.index].bg;
+        if (data.column.index === 5) data.cell.styles.textColor = metas[data.row.index].corSituacao;
       }
     }
   });
@@ -1063,84 +1070,6 @@ function baixarRelatorioPDF() {
   try {
     const doc = gerarPdfRelatorio(d);
     const nomeArquivo = `ponto-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
-    doc.save(nomeArquivo);
-  } catch (e) {
-    showToast('Erro ao gerar PDF: ' + e.message);
-  }
-}
-
-const DISPOSITIVO_LABEL = { loja: 'Loja', pessoal: 'Celular', admin: 'Ajuste manual' };
-
-function gerarPdfExtrato(d) {
-  const { func, ano, mes, dias } = d;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const mesNome = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes];
-  const margem = 40;
-  let y = margem;
-
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(18); doc.setTextColor(15, 20, 23);
-  doc.text('Ponto Nauta', margem, y);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
-  doc.text('Extrato Acompanhamento Diário — todos os registros do mês', margem, y + 14);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
-  doc.text(func.nome, 555, y, { align: 'right' });
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(120, 120, 120);
-  doc.text(`${mesNome} de ${ano}`, 555, y + 14, { align: 'right' });
-  y += 26;
-  doc.setDrawColor(58, 166, 160); doc.setLineWidth(2);
-  doc.line(margem, y, 555, y);
-  y += 16;
-
-  // Uma linha por dia, com os 4 horários e a extra/devedora daquele dia
-  const linhas = [];
-  const cores = [];
-  dias.filter(x => x.status !== 'futuro').forEach(x => {
-    const dataFmt = new Date(x.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-    const horaOuTraco = tipo => {
-      const iso = x.byTipo[tipo];
-      return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—';
-    };
-    let situacao = '—', cor = [120, 120, 120];
-    if (x.status === 'falta') { situacao = 'Falta'; cor = [192, 57, 43]; }
-    else if (x.status === 'folga') { situacao = 'Folga'; cor = [54, 103, 181]; }
-    else if (x.status === 'feriado' && !x.byTipo.entrada) { situacao = 'Feriado'; cor = [15, 125, 118]; }
-    else if (x.extra > 0) { situacao = '+' + fmtHoras(x.extra) + ' extra'; cor = [184, 119, 15]; }
-    else if (x.deficit > 0) { situacao = '-' + fmtHoras(x.deficit) + ' devendo'; cor = [192, 57, 43]; }
-    linhas.push([dataFmt, horaOuTraco('entrada'), horaOuTraco('saida_almoco'), horaOuTraco('volta_almoco'), horaOuTraco('saida'), situacao]);
-    cores.push(cor);
-  });
-
-  doc.autoTable({
-    startY: y,
-    margin: { left: margem, right: 40 },
-    head: [['Dia', 'Entrada', 'Saída almoço', 'Volta almoço', 'Saída', 'Extra / Devedora']],
-    body: linhas.length ? linhas : [['—', '—', '—', '—', '—', 'Nenhum registro neste mês']],
-    styles: { font: 'helvetica', fontSize: 9, cellPadding: 6, halign: 'center' },
-    columnStyles: { 0: { halign: 'left' }, 5: { halign: 'left', fontStyle: 'bold' } },
-    headStyles: { fillColor: [15, 20, 23], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: [248, 249, 250] },
-    didParseCell: data => {
-      if (data.section === 'body' && data.column.index === 5 && cores[data.row.index]) {
-        data.cell.styles.textColor = cores[data.row.index];
-      }
-    }
-  });
-
-  let yFinal = doc.lastAutoTable.finalY + 20;
-  if (yFinal > 760) { doc.addPage(); yFinal = margem; }
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
-  doc.text(`Total de dias no período: ${linhas.length}. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`, margem, yFinal);
-
-  return doc;
-}
-
-function baixarExtratoPDF() {
-  const d = state.ultimoRelatorio;
-  if (!d) return showToast('Gere o relatório primeiro');
-  try {
-    const doc = gerarPdfExtrato(d);
-    const nomeArquivo = `extrato-acompanhamento-diario-${d.func.nome.replace(/\s+/g,'-').toLowerCase()}-${String(d.mes+1).padStart(2,'0')}-${d.ano}.pdf`;
     doc.save(nomeArquivo);
   } catch (e) {
     showToast('Erro ao gerar PDF: ' + e.message);
