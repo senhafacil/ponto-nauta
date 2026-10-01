@@ -969,7 +969,7 @@ const STATUS_PDF_META = {
 };
 
 function gerarPdfRelatorio(d) {
-  const { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, bannerTxt } = d;
+  const { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, valorIndenizacao, bannerTxt } = d;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const mesNome = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes];
@@ -1003,9 +1003,13 @@ function gerarPdfRelatorio(d) {
   const caixas = [
     { label: 'TRABALHADAS', valor: fmtHoras(r.trabalhado), cor: [15, 20, 23], bg: [248, 249, 250], borda: [226, 226, 226] },
     { label: 'EXTRAS', valor: fmtHoras(totalExtraH), cor: [184, 119, 15], bg: [253, 243, 226], borda: [240, 223, 184] },
-    { label: 'DEVEDORAS', valor: fmtHoras(r.deficit), cor: [192, 57, 43], bg: [252, 236, 235], borda: [240, 198, 193] }
+    { label: 'DEVEDORAS', valor: fmtHoras(r.deficit), cor: [192, 57, 43], bg: [252, 236, 235], borda: [240, 198, 193] },
+    { label: 'PAUSA NÃO FEITA', valor: fmtHoras(r.indenizacaoMin), cor: [124, 77, 173], bg: [243, 235, 250], borda: [222, 200, 240] }
   ];
-  if (valorHora) caixas.push({ label: 'VALOR EXTRAS', valor: 'R$ ' + valorExtras.toFixed(2), cor: [31, 157, 99], bg: [232, 248, 240], borda: [191, 232, 212] });
+  if (valorHora) {
+    caixas.push({ label: 'VALOR EXTRAS', valor: 'R$ ' + valorExtras.toFixed(2), cor: [31, 157, 99], bg: [232, 248, 240], borda: [191, 232, 212] });
+    caixas.push({ label: 'VALOR INDENIZ.', valor: 'R$ ' + valorIndenizacao.toFixed(2), cor: [124, 77, 173], bg: [243, 235, 250], borda: [222, 200, 240] });
+  }
   const larguraCaixa = (515 - (caixas.length - 1) * 10) / caixas.length;
   caixas.forEach((c, i) => {
     const cx = margem + i * (larguraCaixa + 10);
