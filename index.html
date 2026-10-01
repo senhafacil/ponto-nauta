@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -93,6 +92,8 @@
   .badge-folga .dot{background:var(--blue);}
   .badge-feriado{background:rgba(58,166,160,.16); color:var(--accent);}
   .badge-feriado .dot{background:var(--accent);}
+  .badge-sem_pausa{background:rgba(155,109,217,.16); color:#9b6dd9;}
+  .badge-sem_pausa .dot{background:#9b6dd9;}
   .day-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line); cursor:pointer;}
   .day-row:last-child{border-bottom:none;}
   .day-row .dinfo{display:flex; flex-direction:column;}
@@ -356,35 +357,43 @@ function classificarDia(dataKey, funcionario, punches, isToday) {
   const b = base.byTipo;
   const completo = !!(b.entrada && b.saida);
 
+  // Calcula trabalhado/extra/devedora/indenização a partir de um início e um fim
+  // (reaproveitado tanto pro dia completo quanto pro caso "bateu só 2 pontos").
+  function calcularComEntradaESaida(inicio, fim) {
+    const span = minutesBetween(inicio, fim);
+    const breakTaken = (b.saida_almoco && b.volta_almoco) ? minutesBetween(b.saida_almoco, b.volta_almoco) : 0;
+    const requiredBreak = span > 360 ? 60 : (span > 240 ? 15 : 0);
+    let trabalhado, indenizacao = 0;
+    if (requiredBreak > 0 && breakTaken < requiredBreak - TOLERANCIA_MIN) {
+      trabalhado = span; // intervalo suprimido/reduzido: trabalhou o período todo
+      indenizacao = requiredBreak - breakTaken; // minutos-base pra indenização (1,5x, NÃO é hora extra)
+    } else {
+      trabalhado = span - breakTaken;
+    }
+    let extra = 0, deficit = 0, taxaExtra = 1.5;
+    if (especial === 'feriado') { extra = trabalhado; taxaExtra = 2; }
+    else { extra = Math.max(0, trabalhado - jornada); deficit = Math.max(0, jornada - trabalhado); }
+    return { trabalhado, extra, deficit, indenizacao, taxaExtra };
+  }
+
   if (!completo) {
+    // Caso comum: ela bateu só "entrada" e "saída almoço" e esqueceu as outras duas —
+    // normalmente é porque trabalhou direto, sem pausa, e esse 2º toque era pra ser a
+    // saída do dia. Tratamos como um dia sem intervalo, separando a hora extra "de
+    // verdade" da indenização por não ter feito a pausa — em vez de somar tudo junto
+    // sem mostrar nada no Extra/Devedora.
+    if (b.entrada && b.saida_almoco && !b.volta_almoco && !b.saida && !isToday) {
+      const calc = calcularComEntradaESaida(b.entrada, b.saida_almoco);
+      return { ...base, status: 'sem_pausa', ...calc };
+    }
     let trabalhadoParcial = 0;
     if (b.entrada && b.saida_almoco) trabalhadoParcial += minutesBetween(b.entrada, b.saida_almoco);
     if (b.volta_almoco && b.saida) trabalhadoParcial += minutesBetween(b.volta_almoco, b.saida);
     return { ...base, status: isToday ? 'andamento' : 'incompleto', trabalhado: trabalhadoParcial };
   }
 
-  const span = minutesBetween(b.entrada, b.saida);
-  const breakTaken = (b.saida_almoco && b.volta_almoco) ? minutesBetween(b.saida_almoco, b.volta_almoco) : 0;
-  const requiredBreak = span > 360 ? 60 : (span > 240 ? 15 : 0);
-
-  let trabalhado, indenizacao = 0;
-  if (requiredBreak > 0 && breakTaken < requiredBreak - TOLERANCIA_MIN) {
-    trabalhado = span; // intervalo suprimido/reduzido: trabalhou o período todo
-    indenizacao = requiredBreak - breakTaken; // minutos-base para indenização (1,5x, não é hora extra)
-  } else {
-    trabalhado = span - breakTaken;
-  }
-
-  let extra = 0, deficit = 0, taxaExtra = 1.5;
-  if (especial === 'feriado') {
-    extra = trabalhado; // feriado trabalhado: tudo é extra a 100%
-    taxaExtra = 2;
-  } else {
-    extra = Math.max(0, trabalhado - jornada);
-    deficit = Math.max(0, jornada - trabalhado);
-  }
-
-  return { ...base, status: 'completo', trabalhado, extra, deficit, indenizacao, taxaExtra };
+  const calc = calcularComEntradaESaida(b.entrada, b.saida);
+  return { ...base, status: 'completo', ...calc };
 }
 
 function statusMeta(status) {
@@ -396,6 +405,7 @@ function statusMeta(status) {
     pendente:   { label: 'Aguardando hoje', cls: 'pendente' },
     folga:      { label: 'Folga',           cls: 'folga' },
     feriado:    { label: 'Feriado',         cls: 'feriado' },
+    sem_pausa:  { label: 'Sem pausa registrada', cls: 'sem_pausa' },
     futuro:     { label: '—',               cls: 'pendente' }
   };
   return map[status] || map.pendente;
@@ -777,7 +787,7 @@ async function renderDailyOut() {
   const rows = dias.map(d => {
     const dateObj = new Date(d.dataKey + 'T12:00:00');
     const label = d.dataKey === todayKey() ? 'Hoje' : dateObj.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-    const nums = (d.status === 'completo' || d.status === 'andamento' || d.status === 'incompleto')
+    const nums = (d.status === 'completo' || d.status === 'andamento' || d.status === 'incompleto' || d.status === 'sem_pausa')
       ? `${fmtHoras(d.trabalhado)} trabalhado${d.extra > 0 ? ' · +' + fmtHoras(d.extra) + ' extra' : ''}${d.deficit > 0 ? ' · -' + fmtHoras(d.deficit) : ''}${d.indenizacao > 0 ? ' · intervalo suprimido' : ''}`
       : '';
     return `<div class="day-row" onclick="abrirEdicaoDia('${f.id}','${d.dataKey}')">
@@ -954,6 +964,7 @@ const STATUS_PDF_META = {
   pendente:   { label: 'Aguardando',    cor: [122,136,148], bg: [241,243,244] },
   folga:      { label: 'Folga',         cor: [54,103,181],  bg: [234,240,251] },
   feriado:    { label: 'Feriado',       cor: [15,125,118],  bg: [228,246,244] },
+  sem_pausa:  { label: 'Sem pausa reg.', cor: [124,77,173],  bg: [243,235,250] },
   futuro:     { label: '—',             cor: [200,206,211], bg: [255,255,255] }
 };
 
@@ -1033,8 +1044,16 @@ function gerarPdfRelatorio(d) {
     if (x.status === 'falta') situacao = 'Falta';
     else if (x.status === 'folga') situacao = 'Folga';
     else if (x.status === 'feriado' && !x.byTipo.entrada) situacao = 'Feriado';
-    else if (x.extra > 0) { situacao = '+' + fmtHoras(x.extra) + ' extra'; corSituacao = [184, 119, 15]; }
-    else if (x.deficit > 0) { situacao = '-' + fmtHoras(x.deficit) + ' devendo'; corSituacao = [192, 57, 43]; }
+    else {
+      const partes = [];
+      if (x.extra > 0) partes.push('+' + fmtHoras(x.extra) + ' extra');
+      if (x.deficit > 0) partes.push('-' + fmtHoras(x.deficit) + ' devendo');
+      if (x.indenizacao > 0) partes.push(fmtHoras(x.indenizacao) + ' pausa não feita (indeniz.)');
+      if (partes.length) {
+        situacao = partes.join(' · ');
+        corSituacao = x.deficit > 0 && x.extra === 0 ? [192, 57, 43] : (x.extra > 0 ? [184, 119, 15] : [124, 77, 173]);
+      }
+    }
     linhas.push([dataFmt, horaOuTraco('entrada'), horaOuTraco('saida_almoco'), horaOuTraco('volta_almoco'), horaOuTraco('saida'), situacao]);
     metas.push({ bg: meta.bg, corSituacao });
   });
