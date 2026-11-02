@@ -44,8 +44,9 @@
   .btn[disabled]{opacity:.4; cursor:not-allowed;}
   .list-item{display:flex; align-items:center; gap:12px; width:100%; background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; text-align:left; color:var(--ink); font-family:'Inter'; font-size:15px; font-weight:600;}
   .avatar{width:38px; height:38px; border-radius:50%; background:var(--surface); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-family:'Manrope'; font-weight:800; font-size:14px; flex-shrink:0;}
-  input,select{width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:13px 14px; font-size:15px; font-family:'Inter'; margin-bottom:12px;}
-  input:focus,select:focus{outline:none; border-color:var(--accent);}
+  input,select,textarea{width:100%; background:var(--surface-2); border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:13px 14px; font-size:15px; font-family:'Inter'; margin-bottom:12px;}
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent);}
+  textarea{resize:vertical;}
   label{font-size:12px; color:var(--muted); font-weight:600; display:block; margin-bottom:6px;}
   .pin-dots{display:flex; justify-content:center; gap:14px; margin:22px 0;}
   .pin-dot{width:16px; height:16px; border-radius:50%; border:2px solid var(--line);}
@@ -105,6 +106,17 @@
   .emp-card .times b{display:block; color:var(--ink); font-size:13px; font-family:'Manrope'; font-weight:700;}
   .select-row{display:flex; gap:10px;}
   .select-row select{margin-bottom:0;}
+  .sheet{position:fixed; inset:0; background:rgba(10,14,17,.97); z-index:55; overflow:auto; padding:22px 18px 40px; display:flex; justify-content:center; align-items:flex-start;}
+  .sheet-inner{width:100%; max-width:440px;}
+  .chk{display:flex; gap:10px; align-items:flex-start; font-size:13px; color:var(--ink); font-weight:500; line-height:1.45; margin:14px 0; cursor:pointer;}
+  .chk input{width:20px; height:20px; margin:1px 0 0; flex-shrink:0; accent-color:var(--accent);}
+  .diff{background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; font-size:13.5px; line-height:1.9;}
+  .diff .arrow{color:var(--muted);}
+  .diff strong{font-family:'Manrope'; font-weight:800;}
+  tr.clicavel{cursor:pointer;}
+  td.aviso{color:var(--amber); font-weight:600;}
+  td.erro{color:var(--danger); font-weight:600;}
+  .assinatura-box{border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.5; margin:14px 0; border:1px solid var(--line); background:var(--surface-2);}
 </style>
 </head>
 <body>
@@ -221,7 +233,12 @@ let state = {
   adminEditingId: null,
   adminEditDay: null,
   adminEditDayPunches: [],
-  ultimoRelatorio: null
+  ultimoRelatorio: null,
+  empMode: 'loja',
+  corrOriginal: null,
+  corrRascunho: null,
+  corrDataPre: null,
+  espCache: null
 };
 
 const TIPOS = [
@@ -287,7 +304,8 @@ async function registrarPonto(funcionarioId, tipo, dispositivo) {
   return entry;
 }
 
-function todayKey() { return new Date().toISOString().slice(0, 10); }
+function localKey(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function todayKey() { return localKey(new Date()); }
 
 async function getPunchesRange(funcionarioId, startDate, endDate) {
   if (sb) {
@@ -414,11 +432,11 @@ function statusMeta(status) {
 async function calcularPeriodo(funcionario, startDate, endDate) {
   const punches = await getPunchesRange(funcionario.id, startDate, endDate);
   const porDia = {};
-  punches.forEach(p => { const k = new Date(p.registrado_em).toISOString().slice(0, 10); (porDia[k] = porDia[k] || []).push(p); });
+  punches.forEach(p => { const k = localKey(new Date(p.registrado_em)); (porDia[k] = porDia[k] || []).push(p); });
   const hojeKey = todayKey();
   const dias = [];
   for (let d = new Date(startDate); d < endDate; d.setDate(d.getDate() + 1)) {
-    const key = d.toISOString().slice(0, 10);
+    const key = localKey(d);
     dias.push(classificarDia(key, funcionario, porDia[key] || [], key === hojeKey));
   }
   return dias;
@@ -456,8 +474,7 @@ screens.home = () => {
   ${topbar('Ponto Nauta')}
   <div class="screen">
     <div class="eyebrow">Este aparelho é</div>
-    ${!mobile ? `<button class="btn btn-primary" onclick="goTo('kioskSelect')">📍 O ponto da loja (uso compartilhado)</button>` : ''}
-    ${mobile ? `<button class="btn btn-primary" onclick="goTo('personalGate')">📱 Celular</button>` : ''}
+    ${!mobile ? `<button class="btn btn-primary" onclick="goTo('kioskSelect')">📍 Bater ponto</button>` : `<div class="card" style="text-align:center">O ponto só pode ser batido no computador da loja.</div>`}
     <div style="flex:1"></div>
     <button class="linkbtn" style="align-self:center; margin-top:20px" onclick="goTo('adminGate')">Painel administrativo</button>
   </div>`;
@@ -466,7 +483,6 @@ screens.home = () => {
 /* --- Modo loja (quiosque) --- */
 screens.kioskSelect = () => {
   const list = state.funcionarios
-    .filter(f => (f.dispositivo_permitido || 'ambos') !== 'pessoal')
     .map(f => `
     <div class="list-item" onclick="selectFuncionaria('${f.id}')">
       <div class="avatar">${initials(f.nome)}</div><div>${f.nome}</div>
@@ -518,7 +534,9 @@ function punchScreen(funcionario, dispositivo, onBack, allowLogout) {
       <div class="clock-display" id="liveClock">${fmtTime(new Date())}</div>
       <div id="punchGrid"></div>
     </div>
-    ${allowLogout ? `<button class="linkbtn" style="align-self:center" onclick="personalLogout()">Sair da conta</button>` : ''}`;
+    <button class="btn btn-outline" onclick="goTo('empCorrigir')">✏️ Corrigir um ponto</button>
+    <button class="btn btn-outline" onclick="goTo('empEspelho')">✅ Conferir e assinar meu ponto</button>
+    ${allowLogout ? `<button class="linkbtn" style="align-self:center; margin-top:14px" onclick="personalLogout()">Sair da conta</button>` : ''}`;
 }
 
 async function loadPunchGrid(funcionarioId, dispositivo) {
@@ -596,6 +614,7 @@ screens.adminGate = () => {
 screens.adminHub = () => `
   ${topbar('Painel admin', "goTo('home')")}
   <button class="btn btn-primary" style="margin-bottom:10px" onclick="goTo('adminDaily')">📅 Acompanhamento diário</button>
+  <button class="btn btn-outline" style="margin-bottom:10px" onclick="goTo('adminCorrecoes')">🔔 Correções de ponto <span id="corrContador" class="badge badge-andamento" style="display:none; margin-left:6px"></span></button>
   <button class="btn btn-outline" style="margin-bottom:10px" onclick="goTo('adminReport')">📄 Relatório mensal (CLT)</button>
   <button class="btn btn-outline" onclick="goTo('adminFuncionarios')">👥 Funcionárias</button>`;
 
@@ -619,7 +638,7 @@ async function carregarListaFuncionarios() {
         <b>${f.nome}</b>
         <span class="badge ${f.ativo ? 'badge-completo' : 'badge-falta'}"><span class="dot"></span>${f.ativo ? 'Ativa' : 'Inativa'}</span>
       </div>
-      <div class="times">PIN ${f.pin || '—'} · usuário ${f.usuario || '—'} · ${(f.jornada_diaria_horas||8)}h/dia${f.dispositivo_permitido && f.dispositivo_permitido !== 'ambos' ? ' · ' + (f.dispositivo_permitido === 'loja' ? 'só loja' : 'só celular') : ''}</div>
+      <div class="times">PIN ${f.pin || '—'} · ${(f.jornada_diaria_horas||8)}h/dia</div>
       ${f.pin_bloqueado || f.senha_bloqueada ? `<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
         ${f.pin_bloqueado ? `<span class="badge badge-falta">🔒 PIN bloqueado</span>` : ''}
         ${f.senha_bloqueada ? `<span class="badge badge-falta">🔒 Senha bloqueada</span>` : ''}
@@ -629,7 +648,7 @@ async function carregarListaFuncionarios() {
         <button class="btn ${f.ativo ? 'btn-danger' : 'btn-outline'}" style="padding:10px" onclick="alternarAtivo('${f.id}', ${f.ativo})">${f.ativo ? 'Desativar' : 'Ativar'}</button>
       </div>
       ${f.pin_bloqueado || f.senha_bloqueada ? `<button class="btn btn-outline" style="margin-top:8px; padding:10px" onclick="desbloquear('${f.id}')">🔓 Desbloquear PIN e senha</button>` : ''}
-      <button class="linkbtn" style="margin-top:8px; color:var(--danger)" onclick="excluirFuncionaria('${f.id}', '${f.nome.replace(/'/g,"\\'")}')">Excluir cadastro</button>
+      <button class="linkbtn" style="margin-top:8px; color:var(--danger)" onclick="excluirFuncionaria('${f.id}', '${f.nome.replace(/'/g,"\\'")}')">Excluir de vez (apaga o nome e todo o histórico)</button>
     </div>`).join('') || `<div class="empty">Nenhuma funcionária cadastrada ainda.</div>`;
 }
 
@@ -641,17 +660,20 @@ async function desbloquear(id) {
 }
 
 async function excluirFuncionaria(id, nome) {
-  if (!confirm(`Excluir o cadastro de ${nome}? Isso não pode ser desfeito.`)) return;
-  const { error } = await sb.from('funcionarios').delete().eq('id', id);
-  if (error) {
-    if (error.message.includes('foreign key') || error.code === '23503') {
-      showToast(`${nome} já tem pontos batidos — não dá pra excluir sem perder o histórico. Use "Desativar" em vez disso.`);
-    } else {
-      showToast('Erro ao excluir: ' + error.message);
+  const { count } = await sb.from('pontos').select('id', { count: 'exact', head: true }).eq('funcionario_id', id);
+  const aviso = count ? `\n\nIsso apaga também os ${count} pontos batidos por ela, os pedidos de correção e as assinaturas. NÃO dá pra desfazer.` : '\n\nNÃO dá pra desfazer.';
+  if (!confirm(`Excluir ${nome} de vez?${aviso}`)) return;
+  try {
+    for (const tabela of ['pontos', 'correcoes', 'assinaturas']) {
+      const r = await sb.from(tabela).delete().eq('funcionario_id', id);
+      if (r.error && tabela === 'pontos') throw r.error;
     }
-    return;
-  }
-  showToast('Cadastro excluído');
+    const { error } = await sb.from('funcionarios').delete().eq('id', id);
+    if (error) throw error;
+  } catch (e) { return showToast('Erro ao excluir: ' + (e.message || e)); }
+  try { localStorage.removeItem(diasEspeciaisKey(id)); } catch (e) {}
+  showToast('Funcionária excluída');
+  state.adminDailyFocus = null;
   await loadFuncionarios();
   carregarListaFuncionarios();
 }
@@ -668,25 +690,8 @@ screens.adminFuncionarioForm = () => {
     </label>`).join('');
   return `${topbar(id ? 'Editar funcionária' : 'Nova funcionária', "goTo('adminFuncionarios')")}
     <label>Nome</label><input id="fNome" value="${f ? f.nome : ''}" placeholder="Nome completo">
-    <label>Onde ela pode bater ponto</label>
-    <select id="fDispositivo">
-      <option value="ambos" ${(!f || (f.dispositivo_permitido||'ambos')==='ambos') ? 'selected' : ''}>Computador da loja e celular pessoal</option>
-      <option value="loja" ${f && f.dispositivo_permitido==='loja' ? 'selected' : ''}>Só computador da loja</option>
-      <option value="pessoal" ${f && f.dispositivo_permitido==='pessoal' ? 'selected' : ''}>Só celular pessoal</option>
-    </select>
-    <label>PIN (exatamente 4 números, ponto da loja)</label><input id="fPin" value="${f ? (f.pin||'') : ''}" placeholder="0000" maxlength="4" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
-    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Só números — é o que ela vai digitar no teclado do ponto da loja.</div>
-    <label>Usuário (celular pessoal)</label><input id="fUsuario" value="${f ? (f.usuario||'') : ''}" placeholder="usuario">
-    <label>Senha (celular pessoal)</label><input id="fSenha" value="${f ? (f.senha||'') : ''}" placeholder="senha">
-
-    <label>Endereço da casa dela, onde ela pode bater ponto pelo celular (opcional)</label>
-    <input id="fEndereco" value="${f ? (f.endereco_texto||'') : ''}" placeholder="Rua, número, bairro, cidade">
-    <div class="muted-small" style="margin-top:-8px; margin-bottom:10px;">${f && f.latitude != null ? `📍 Localização já registrada (${f.latitude}, ${f.longitude})` : 'Ao salvar, o sistema já localiza esse endereço sozinho.'}</div>
-    <input type="hidden" id="fLat" value="${f && f.latitude != null ? f.latitude : ''}">
-    <input type="hidden" id="fLng" value="${f && f.longitude != null ? f.longitude : ''}">
-    <label>Raio permitido (metros)</label>
-    <input id="fRaio" type="number" value="${f ? (f.raio_metros||50) : 50}" min="10" max="1000">
-    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Se deixar o endereço em branco, ela pode bater ponto pelo celular de qualquer lugar.</div>
+    <label>PIN (exatamente 4 números)</label><input id="fPin" value="${f ? (f.pin||'') : ''}" placeholder="0000" maxlength="4" inputmode="numeric" pattern="[0-9]*" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+    <div class="muted-small" style="margin-top:-8px; margin-bottom:12px;">Só números — é o que ela vai digitar no ponto da loja.</div>
     <label>Jornada diária (horas)</label><input id="fJornada" type="number" step="0.5" value="${f ? (f.jornada_diaria_horas||8) : 8}">
     <label>Valor da hora (R$, opcional)</label><input id="fValorHora" type="number" step="0.01" value="${f ? (f.valor_hora||'') : ''}" placeholder="opcional">
     <label>Dias de folga fixa</label>
@@ -713,29 +718,19 @@ async function salvarFuncionaria(id) {
   const pin = document.getElementById('fPin').value.trim();
   if (pin && !/^\d{4}$/.test(pin)) return showToast('O PIN precisa ter exatamente 4 números (0 a 9), sem letras');
   const diasFolga = WEEKDAYS.map((_, i) => i).filter(i => document.getElementById('folga'+i).checked);
-  const enderecoNovo = document.getElementById('fEndereco').value.trim();
-  const fAtual = id ? (state.adminFuncionariosAll || []).find(x => x.id === id) : null;
-  let { lat, lng } = await geocodificarSeNecessario(enderecoNovo, fAtual && fAtual.latitude, fAtual && fAtual.longitude, fAtual && fAtual.endereco_texto);
-  if (enderecoNovo && lat === null) showToast('⚠️ Não achei esse endereço automaticamente — salvando sem localização. Confira se está completo (rua, número, bairro, cidade).');
   const payload = {
     nome,
     pin,
-    usuario: document.getElementById('fUsuario').value.trim() || null,
-    senha: document.getElementById('fSenha').value,
     jornada_diaria_horas: parseFloat(document.getElementById('fJornada').value) || 8,
     valor_hora: parseFloat(document.getElementById('fValorHora').value) || null,
     dias_folga: diasFolga,
-    dispositivo_permitido: document.getElementById('fDispositivo').value,
-    endereco_texto: enderecoNovo || null,
-    latitude: lat,
-    longitude: lng,
-    raio_metros: parseInt(document.getElementById('fRaio').value) || 50,
+    dispositivo_permitido: 'loja',
     ativo: true,
     pin_tentativas: 0, pin_bloqueado: false, senha_tentativas: 0, senha_bloqueada: false
   };
   const { error } = id
     ? await sb.from('funcionarios').update(payload).eq('id', id)
-    : await sb.from('funcionarios').insert(payload);
+    : await sb.from('funcionarios').insert({ ...payload, usuario: null, senha: '' });
   if (error) return showToast('Erro ao salvar: ' + error.message);
   showToast(id ? 'Atualizada!' : 'Cadastrada!');
   await loadFuncionarios();
@@ -929,7 +924,18 @@ async function carregarRelatorio() {
       <td class="num ${d.extra > 0 ? 'extra' : ''}">${d.extra > 0 ? fmtHoras(d.extra) : '—'}</td>
       <td class="num ${d.deficit > 0 ? 'deficit' : ''}">${d.deficit > 0 ? fmtHoras(d.deficit) : '—'}</td>
     </tr>`).join('');
-  state.ultimoRelatorio = { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, valorIndenizacao, saldoMin, bannerTxt };
+  const periodo = `${ano}-${String(mes + 1).padStart(2, '0')}`;
+  const ass = await buscarAssinaturaMes(func.id, periodo);
+  const estadoAss = ass ? await estadoAssinatura(ass, func.id, periodo, dias) : null;
+  const corrAprov = await buscarCorrecoesDoMes(func.id, periodo, 'aprovada');
+  const corrPend = await buscarCorrecoesDoMes(func.id, periodo, 'pendente');
+  state.ultimoRelatorio = { func, ano, mes, dias, r, valorHora, totalExtraH, valorExtras, valorIndenizacao, saldoMin, bannerTxt, ass, estadoAss, corrAprov, corrPend };
+  let blocoAss;
+  if (ass && estadoAss === 'ok') blocoAss = `<div class="assinatura-box" style="border-color:var(--success)">✅ Conferido e assinado digitalmente por ${esc(func.nome)} em ${fmtDataHora(ass.assinado_em)} (período até ${fmtPeriodo(ass.ate, ass.ate).split(' a ')[0]}).<br><span style="color:var(--muted)">Código ${codigoCurto(ass.hash)}</span></div>`;
+  else if (ass) blocoAss = `<div class="assinatura-box" style="border-color:var(--amber)">⚠ ${esc(func.nome)} assinou em ${fmtDataHora(ass.assinado_em)}, mas o ponto foi alterado depois disso. Peça para ela conferir e assinar de novo.</div>`;
+  else blocoAss = `<div class="assinatura-box">Ainda não assinado por ${esc(func.nome)}. Ela confere e assina em "Conferir e assinar meu ponto".</div>`;
+  if (corrPend.length) blocoAss += `<div class="assinatura-box" style="border-color:var(--amber)">🔔 ${corrPend.length} correção(ões) deste mês aguardando a sua aprovação (Painel › Correções de ponto).</div>`;
+  if (corrAprov.length) blocoAss += `<div class="assinatura-box"><b>Ajustes aprovados no mês</b>${corrAprov.map(c => `<div style="margin-top:6px"><span style="text-transform:capitalize">${fmtDiaCurto(c.data)}</span> — ${esc(c.motivo)}${diffHorarios(c.original, c.proposto)}</div>`).join('')}</div>`;
   out.innerHTML = `
     <div class="badge ${bannerCls}" style="display:flex; padding:12px 14px; font-size:13px; margin:14px 0 4px; white-space:normal; line-height:1.4"><span class="dot"></span>${bannerTxt}</div>
     <div class="summary-grid g3">
@@ -948,6 +954,7 @@ async function carregarRelatorio() {
     <div class="muted-small">Jornada: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · extra normal +50%, feriado trabalhado +100% ·
     intervalo obrigatório 1h (jornada &gt;6h) ou 15min (&gt;4h), tolerância de ${TOLERANCIA_MIN}min · intervalo suprimido além da tolerância gera indenização de 1,5x (não é hora extra, não reflete em FGTS/13º/férias) ·
     dias marcados como folga compensada/abono não geram débito. Ajuste feriados, folgas e abonos na tela de Acompanhamento diário.</div>
+    ${blocoAss}
     <button class="btn btn-primary" style="margin-top:14px" onclick="baixarRelatorioPDF()">📄 Baixar relatório em PDF</button>`;
 }
 
@@ -1082,7 +1089,48 @@ function gerarPdfRelatorio(d) {
   if (yFinal > 760) { doc.addPage(); yFinal = margem; }
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 140);
   const notaTexto = `Jornada de referência: ${fmtHoras((func.jornada_diaria_horas||8)*60)}/dia · hora extra normal +50%, feriado trabalhado +100% · intervalo obrigatório de 1h (jornada acima de 6h) ou 15min (acima de 4h), com tolerância de ${TOLERANCIA_MIN} minutos · intervalo suprimido além da tolerância gera indenização de 1,5x, de natureza indenizatória (não reflete em FGTS, 13º ou férias) · dias marcados como folga compensada ou abono/atestado não geram débito. Gerado por Ponto Nauta em ${new Date().toLocaleDateString('pt-BR')}.`;
-  doc.text(doc.splitTextToSize(notaTexto, 515), margem, yFinal);
+  const notaLinhas = doc.splitTextToSize(notaTexto, 515);
+  doc.text(notaLinhas, margem, yFinal);
+  yFinal += notaLinhas.length * 10 + 18;
+
+  // Ajustes aprovados + conferência/assinatura da funcionária
+  const espaco = h => { if (yFinal + h > 790) { doc.addPage(); yFinal = margem; } };
+  const fmtDH = iso => { const dt = new Date(iso); return dt.toLocaleDateString('pt-BR') + ' às ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); };
+  const { ass, estadoAss, corrAprov } = d;
+  if (corrAprov && corrAprov.length) {
+    espaco(30 + corrAprov.length * 12);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+    doc.text('Ajustes aprovados neste mês', margem, yFinal); yFinal += 13;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(90, 90, 90);
+    corrAprov.forEach(c => {
+      const mudancas = TIPOS.filter(t => ((c.original || {})[t.key] || '') !== ((c.proposto || {})[t.key] || ''))
+        .map(t => `${t.label} ${((c.original || {})[t.key]) || '—'} > ${((c.proposto || {})[t.key]) || 'apagado'}`).join('; ');
+      const txt = `${c.data.slice(8, 10)}/${c.data.slice(5, 7)}: ${mudancas} (${c.motivo}${c.observacao ? ' - ' + c.observacao : ''})`;
+      const ls = doc.splitTextToSize(txt, 515);
+      espaco(ls.length * 10 + 4);
+      doc.text(ls, margem, yFinal); yFinal += ls.length * 10 + 3;
+    });
+    yFinal += 10;
+  }
+  espaco(70);
+  doc.setDrawColor(200, 200, 200); doc.setLineWidth(0.6); doc.line(margem, yFinal, margem + 515, yFinal); yFinal += 16;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+  if (ass && estadoAss === 'ok') {
+    doc.setTextColor(31, 157, 99);
+    doc.text('Conferido e assinado digitalmente pela funcionária', margem, yFinal); yFinal += 14;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+    doc.text(`${func.nome} - ${fmtDH(ass.assinado_em)} - período até ${ass.ate.slice(8, 10)}/${ass.ate.slice(5, 7)}`, margem, yFinal); yFinal += 12;
+    doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+    doc.text(`Código de verificação (SHA-256): ${ass.hash.slice(0, 32)}`, margem, yFinal);
+  } else if (ass) {
+    doc.setTextColor(184, 119, 15);
+    doc.text('Atenção: o ponto foi alterado depois da assinatura da funcionária', margem, yFinal); yFinal += 14;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(60, 60, 60);
+    doc.text(`Assinatura de ${fmtDH(ass.assinado_em)} não confere mais com os horários atuais. É preciso conferir e assinar de novo.`, margem, yFinal);
+  } else {
+    doc.setTextColor(120, 120, 120);
+    doc.text('Ainda não conferido/assinado pela funcionária', margem, yFinal);
+  }
 
   return doc;
 }
@@ -1100,6 +1148,422 @@ function baixarRelatorioPDF() {
 }
 
 /* ---------------------------------------------------------------------
+   Correção de ponto + conferência/assinatura digital da funcionária
+   - Ela pede a correção de um dia, confere e assina com PIN (loja) ou
+     senha (celular). O pedido fica PENDENTE até a administradora aprovar.
+   - No fim do mês ela confere o espelho e assina; a assinatura guarda
+     um código (SHA-256) do conteúdo e avisa se o ponto mudar depois.
+--------------------------------------------------------------------- */
+const MESES_NOME = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const MOTIVOS_CORRECAO = [
+  'Esqueci de bater',
+  'Bati o tipo errado (ex.: saída no lugar da saída do almoço)',
+  'Não consegui bater (sem sinal / sistema fora do ar)',
+  'Outro motivo'
+];
+
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function hhmm(iso) { return new Date(iso).toTimeString().slice(0, 5); }
+function fmtDiaLongo(dataKey) { return new Date(dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }); }
+function fmtDiaCurto(dataKey) { return new Date(dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }); }
+function fmtDataHora(iso) { const d = new Date(iso); return d.toLocaleDateString('pt-BR') + ' às ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }
+function codigoCurto(hash) { return (hash || '').slice(0, 10).toUpperCase(); }
+function empAtual() { return state.empMode === 'pessoal' ? state.personalUser : state.selectedFuncionario; }
+function empVoltarJs() { return state.empMode === 'pessoal' ? "goTo('personalPunch')" : "goTo('kioskPunch')"; }
+function fmtPeriodo(dataKeyIni, dataKeyFim) { const f = k => k.slice(8, 10) + '/' + k.slice(5, 7); return f(dataKeyIni) + ' a ' + f(dataKeyFim); }
+
+async function sha256Hex(txt) {
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    let h = 5381; for (let i = 0; i < txt.length; i++) h = ((h << 5) + h + txt.charCodeAt(i)) >>> 0;
+    return 'f' + h.toString(16).padStart(8, '0') + txt.length.toString(16).padStart(8, '0');
+  }
+}
+
+/* Confere PIN (loja) ou senha (celular) no servidor; usa o mesmo bloqueio de 3 erros */
+async function verificarCredencial(func, dispositivo, valor) {
+  if (!sb) return { ok: false, msg: 'Sem conexão com o servidor. Tente de novo em instantes.' };
+  const loja = dispositivo !== 'pessoal';
+  const campo = loja ? 'pin' : 'senha', tentC = loja ? 'pin_tentativas' : 'senha_tentativas', bloqC = loja ? 'pin_bloqueado' : 'senha_bloqueada';
+  const { data: fresh } = await sb.from('funcionarios').select(`id, ${campo}, ${tentC}, ${bloqC}`).eq('id', func.id).maybeSingle();
+  if (!fresh) return { ok: false, msg: 'Não consegui verificar. Tente de novo.' };
+  if (fresh[bloqC]) return { ok: false, msg: `🔒 ${loja ? 'PIN' : 'Senha'} bloqueado(a). Fale com a administradora.` };
+  if (String(fresh[campo]) === String(valor)) {
+    await sb.from('funcionarios').update({ [tentC]: 0 }).eq('id', func.id);
+    return { ok: true };
+  }
+  const t = (fresh[tentC] || 0) + 1;
+  const bloq = t >= 3;
+  await sb.from('funcionarios').update({ [tentC]: t, [bloqC]: bloq }).eq('id', func.id);
+  return { ok: false, msg: bloq ? `🔒 ${loja ? 'PIN' : 'Senha'} bloqueado(a). Fale com a administradora.` : `${loja ? 'PIN' : 'Senha'} incorreto(a) (tentativa ${t} de 3)` };
+}
+
+/* --- Janela de assinatura (pede declaração + PIN/senha) --- */
+function mostrarAssinatura({ titulo, corpoHtml, declaracao, confirmarJs, botao }) {
+  fecharAssinatura();
+  const loja = state.empMode !== 'pessoal';
+  const campo = loja
+    ? `<input id="assCred" type="password" inputmode="numeric" maxlength="4" placeholder="Seu PIN (4 números)" autocomplete="off" oninput="this.value=this.value.replace(/[^0-9]/g,'')">`
+    : `<div style="position:relative"><input id="assCred" type="password" placeholder="Sua senha" autocomplete="current-password" style="padding-right:44px"><button type="button" onclick="togglePwdField('assCred', this)" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:16px; cursor:pointer;">👁</button></div>`;
+  const el = document.createElement('div');
+  el.className = 'sheet'; el.id = 'assSheet';
+  el.innerHTML = `<div class="sheet-inner">
+    <div class="eyebrow">Assinatura digital</div>
+    <h2 style="margin-bottom:14px">${titulo}</h2>
+    ${corpoHtml}
+    <label class="chk"><input type="checkbox" id="assCheck"><span>${declaracao}</span></label>
+    <label>${loja ? 'Digite seu PIN para assinar' : 'Digite sua senha para assinar'}</label>
+    ${campo}
+    <button class="btn btn-primary" id="assBtn" onclick="${confirmarJs}">${botao}</button>
+    <button class="btn btn-outline" onclick="fecharAssinatura()">Cancelar</button>
+  </div>`;
+  document.body.appendChild(el);
+}
+function fecharAssinatura() { document.getElementById('assSheet')?.remove(); }
+
+async function validarAssinatura() {
+  if (!document.getElementById('assCheck').checked) { showToast('Marque a declaração para poder assinar'); return false; }
+  const valor = document.getElementById('assCred').value;
+  if (!valor) { showToast(state.empMode === 'pessoal' ? 'Digite sua senha' : 'Digite seu PIN'); return false; }
+  const btn = document.getElementById('assBtn'); btn.disabled = true;
+  const r = await verificarCredencial(empAtual(), state.empMode === 'pessoal' ? 'pessoal' : 'loja', valor);
+  btn.disabled = false;
+  if (!r.ok) { showToast(r.msg); return false; }
+  return true;
+}
+
+/* --- Visual das diferenças antes -> depois --- */
+function diffHorarios(orig, prop, comoBloco) {
+  const itens = TIPOS.filter(t => ((orig || {})[t.key] || '') !== ((prop || {})[t.key] || '')).map(t => {
+    const o = (orig || {})[t.key] || '', n = (prop || {})[t.key] || '';
+    return `${t.label}: ${o ? esc(o) : '—'} <span class="arrow">→</span> <strong>${n ? esc(n) : 'apagar'}</strong>`;
+  });
+  return comoBloco ? itens.map(i => `<div>${i}</div>`).join('') : itens.map(i => `<div style="font-size:12px; margin-top:3px">${i}</div>`).join('');
+}
+function badgeCorrecao(status) {
+  const m = { pendente: ['andamento', 'Aguardando aprovação'], aprovada: ['completo', 'Aprovada'], recusada: ['falta', 'Recusada'] }[status] || ['pendente', status];
+  return `<span class="badge badge-${m[0]}"><span class="dot"></span>${m[1]}</span>`;
+}
+
+/* ===== Funcionária: corrigir um ponto ===== */
+screens.empCorrigir = () => {
+  const hoje = new Date(); const min = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const pre = state.corrDataPre; state.corrDataPre = null;
+  const valor = (pre && pre >= localKey(min) && pre <= localKey(hoje)) ? pre : localKey(hoje);
+  return `${topbar('Corrigir ponto', empVoltarJs())}
+    <div class="muted-small" style="margin:-8px 0 14px">Escolha o dia deste mês, acerte os horários e assine. A correção só passa a valer nas contas depois que a administradora aprovar.</div>
+    <label>Dia</label>
+    <input type="date" id="corrData" value="${valor}" min="${localKey(min)}" max="${localKey(hoje)}" onchange="carregarDiaCorrecao()">
+    <div class="card"><div id="corrCampos"><div class="empty">Carregando...</div></div></div>
+    <label>Motivo</label>
+    <select id="corrMotivo">${MOTIVOS_CORRECAO.map(m => `<option>${m}</option>`).join('')}</select>
+    <label>Explique (obrigatório se for "Outro motivo")</label>
+    <textarea id="corrObs" rows="2" maxlength="300" placeholder="Ex.: cheguei 8h mas só bati às 8h40"></textarea>
+    <button class="btn btn-primary" onclick="abrirAssinaturaCorrecao()">Revisar e assinar</button>
+    <div class="eyebrow" style="margin-top:24px">Meus pedidos</div>
+    <div id="corrMeus"></div>`;
+};
+
+async function carregarDiaCorrecao() {
+  const f = empAtual(); const el = document.getElementById('corrCampos');
+  const dataKey = document.getElementById('corrData')?.value;
+  if (!el || !f) return;
+  if (!dataKey) { el.innerHTML = '<div class="empty">Escolha um dia.</div>'; return; }
+  el.innerHTML = '<div class="empty">Carregando...</div>';
+  const start = new Date(dataKey + 'T00:00:00'); const end = new Date(start); end.setDate(end.getDate() + 1);
+  const punches = await getPunchesRange(f.id, start, end);
+  if (document.getElementById('corrData')?.value !== dataKey) return;
+  const orig = {};
+  TIPOS.forEach(t => { const p = punches.find(x => x.tipo === t.key); orig[t.key] = p ? hhmm(p.registrado_em) : ''; });
+  state.corrOriginal = { dataKey, orig };
+  const nomeFer = nomeFeriado(dataKey);
+  el.innerHTML = `<div class="eyebrow" style="text-transform:capitalize">${fmtDiaLongo(dataKey)}</div>
+    ${nomeFer ? `<div class="muted-small" style="margin:-2px 0 10px">Feriado: ${esc(nomeFer)}</div>` : ''}
+    ${TIPOS.map(t => `<label>${t.label}</label><input type="time" id="ctime_${t.key}" value="${orig[t.key]}">`).join('')}
+    <div class="muted-small">Coloque o horário certo em cada campo. Deixe em branco o que não aconteceu naquele dia.</div>`;
+}
+
+async function abrirAssinaturaCorrecao() {
+  const f = empAtual(); const o = state.corrOriginal;
+  if (!f || !o) return showToast('Escolha o dia primeiro');
+  if (!sb) return showToast('Sem conexão com o servidor. Tente de novo em instantes.');
+  const dataKey = document.getElementById('corrData').value;
+  if (dataKey !== o.dataKey) return showToast('Aguarde o dia carregar');
+  { const h = new Date(); if (dataKey < localKey(new Date(h.getFullYear(), h.getMonth(), 1)) || dataKey > todayKey()) return showToast('Só dá pra corrigir dias do mês atual'); }
+  const prop = {}; TIPOS.forEach(t => prop[t.key] = document.getElementById('ctime_' + t.key)?.value || '');
+  if (!TIPOS.some(t => prop[t.key] !== o.orig[t.key])) return showToast('Você ainda não mudou nenhum horário');
+  const preench = TIPOS.filter(t => prop[t.key]);
+  for (let i = 1; i < preench.length; i++) {
+    if (prop[preench[i].key] <= prop[preench[i - 1].key]) return showToast(`"${preench[i].label}" precisa ser depois de "${preench[i - 1].label}"`);
+  }
+  if (dataKey === todayKey()) {
+    const agora = new Date().toTimeString().slice(0, 5);
+    const fut = preench.find(t => prop[t.key] > agora);
+    if (fut) return showToast(`"${fut.label}" está no futuro — confira o horário`);
+  }
+  const motivo = document.getElementById('corrMotivo').value;
+  const obs = document.getElementById('corrObs').value.trim();
+  if (motivo === 'Outro motivo' && obs.length < 5) return showToast('Explique o motivo no campo abaixo');
+  const { data: pend, error } = await sb.from('correcoes').select('id').eq('funcionario_id', f.id).eq('data', dataKey).eq('status', 'pendente').limit(1);
+  if (error) return showToast('Erro: ' + error.message);
+  if (pend && pend.length) return showToast('Você já tem um pedido aguardando aprovação para este dia');
+  state.corrRascunho = { dataKey, orig: o.orig, prop, motivo, obs };
+  mostrarAssinatura({
+    titulo: 'Confirmar correção',
+    corpoHtml: `<div class="eyebrow" style="text-transform:capitalize">${fmtDiaLongo(dataKey)}</div>
+      <div class="diff">${diffHorarios(o.orig, prop, true)}</div>
+      <div class="muted-small" style="margin-top:8px">Motivo: ${esc(motivo)}${obs ? ' — ' + esc(obs) : ''}</div>`,
+    declaracao: 'Declaro que os horários acima conferem com o que realmente aconteceu neste dia.',
+    confirmarJs: 'enviarCorrecaoAssinada()',
+    botao: 'Assinar e enviar'
+  });
+}
+
+async function enviarCorrecaoAssinada() {
+  const r = state.corrRascunho; const f = empAtual();
+  if (!r || !f) return;
+  if (!(await validarAssinatura())) return;
+  const assinadoEm = new Date().toISOString();
+  const fmt = obj => TIPOS.map(t => t.key + '=' + (obj[t.key] || '-')).join(',');
+  const conteudo = ['CORRECAO', f.id, r.dataKey, fmt(r.orig), fmt(r.prop), r.motivo, r.obs, assinadoEm].join('|');
+  const hash = await sha256Hex(conteudo);
+  const { error } = await sb.from('correcoes').insert({
+    funcionario_id: f.id, data: r.dataKey, original: r.orig, proposto: r.prop, motivo: r.motivo, observacao: r.obs,
+    dispositivo: state.empMode === 'pessoal' ? 'pessoal' : 'loja', status: 'pendente',
+    assinatura_hash: hash, assinatura_conteudo: conteudo, assinado_em: assinadoEm
+  });
+  if (error) return showToast('Não consegui enviar: ' + error.message);
+  fecharAssinatura();
+  state.corrRascunho = null;
+  const el = document.createElement('div'); el.className = 'feedback';
+  el.innerHTML = `<div class="icon">✓</div><h2>Pedido assinado e enviado</h2><p>Aguarde a aprovação da administradora.<br>Código ${codigoCurto(hash)}</p>`;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 2200);
+  carregarMeusPedidos();
+}
+
+async function carregarMeusPedidos() {
+  const f = empAtual(); const el = document.getElementById('corrMeus');
+  if (!el || !f) return;
+  if (!sb) { el.innerHTML = '<div class="muted-small">Sem conexão com o servidor.</div>'; return; }
+  const { data, error } = await sb.from('correcoes').select('*').eq('funcionario_id', f.id).order('criado_em', { ascending: false }).limit(8);
+  if (error) { el.innerHTML = `<div class="muted-small">Não consegui carregar seus pedidos (${esc(error.message)}).</div>`; return; }
+  if (!data.length) { el.innerHTML = '<div class="empty" style="padding:14px">Nenhum pedido ainda.</div>'; return; }
+  el.innerHTML = data.map(c => `<div class="emp-card" style="cursor:default">
+    <div class="top"><b style="text-transform:capitalize">${fmtDiaCurto(c.data)}</b>${badgeCorrecao(c.status)}</div>
+    <div style="color:var(--muted); margin-top:6px">${diffHorarios(c.original, c.proposto)}</div>
+    ${c.status === 'recusada' && c.decisao_obs ? `<div class="muted-small">Motivo da recusa: ${esc(c.decisao_obs)}</div>` : ''}
+  </div>`).join('');
+}
+
+/* ===== Funcionária: conferir o espelho do mês e assinar ===== */
+screens.empEspelho = () => {
+  const hoje = new Date();
+  const opts = [0, 1, 2].map(i => { const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1); return `<option value="${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}">${MESES_NOME[d.getMonth()]} ${d.getFullYear()}</option>`; }).join('');
+  return `${topbar('Conferir meu ponto', empVoltarJs())}
+    <label>Mês</label>
+    <select id="espMes" onchange="carregarEspelho()">${opts}</select>
+    <div id="espOut"><div class="empty">Carregando...</div></div>`;
+};
+
+function conteudoAssinaturaMes(funcId, periodo, ate, dias) {
+  const linhas = [];
+  dias.filter(d => d.dataKey <= ate).forEach(d => TIPOS.forEach(t => { if (d.byTipo[t.key]) linhas.push(`${d.dataKey}|${t.key}|${hhmm(d.byTipo[t.key])}`); }));
+  return ['ESPELHO', funcId, periodo, ate, ...linhas].join('\n');
+}
+async function buscarAssinaturaMes(funcId, periodo) {
+  if (!sb) return null;
+  const { data, error } = await sb.from('assinaturas').select('*').eq('funcionario_id', funcId).eq('periodo', periodo).order('assinado_em', { ascending: false }).limit(1);
+  return (!error && data && data.length) ? data[0] : null;
+}
+async function buscarCorrecoesDoMes(funcId, periodo, status) {
+  if (!sb) return [];
+  const [a, m] = periodo.split('-').map(Number);
+  const ini = periodo + '-01', fim = localKey(new Date(a, m, 0));
+  let q = sb.from('correcoes').select('*').eq('funcionario_id', funcId).gte('data', ini).lte('data', fim).order('data');
+  if (status) q = q.eq('status', status);
+  const { data, error } = await q;
+  return error ? [] : (data || []);
+}
+/* 'ok' se o ponto continua igual ao que ela assinou; 'alterado' se mudou depois */
+async function estadoAssinatura(ass, funcId, periodo, dias) {
+  const conteudo = conteudoAssinaturaMes(funcId, periodo, ass.ate, dias);
+  return (await sha256Hex(conteudo)) === ass.hash ? 'ok' : 'alterado';
+}
+
+async function carregarEspelho() {
+  const f = empAtual(); const out = document.getElementById('espOut'); const sel = document.getElementById('espMes');
+  if (!f || !out || !sel) return;
+  const periodo = sel.value;
+  out.innerHTML = '<div class="empty">Carregando...</div>';
+  if (!sb) { out.innerHTML = '<div class="empty">Sem conexão com o servidor.</div>'; return; }
+  const [a, m] = periodo.split('-').map(Number);
+  const inicio = new Date(a, m - 1, 1), fimMes = new Date(a, m, 0);
+  const ontem = new Date(); ontem.setHours(0, 0, 0, 0); ontem.setDate(ontem.getDate() - 1);
+  const ate = fimMes < ontem ? fimMes : ontem;
+  if (ate < inicio) { out.innerHTML = '<div class="empty">Ainda não há dias fechados neste mês.</div>'; return; }
+  const ateKey = localKey(ate);
+  const fim = new Date(ate); fim.setDate(fim.getDate() + 1);
+  const dias = await calcularPeriodo(f, inicio, fim);
+  const [ass, pend] = await Promise.all([buscarAssinaturaMes(f.id, periodo), buscarCorrecoesDoMes(f.id, periodo, 'pendente')]);
+  if (document.getElementById('espMes')?.value !== periodo) return;
+  state.espCache = { f, periodo, ateKey, dias };
+  const hh = (d, t) => d.byTipo[t] ? hhmm(d.byTipo[t]) : '—';
+  const linhas = dias.map(d => {
+    const rotulo = statusMeta(d.status).label;
+    const temBatida = Object.keys(d.byTipo).length > 0;
+    const incompleto = d.status === 'incompleto' || d.status === 'sem_pausa';
+    const dia = `<td>${incompleto ? '⚠ ' : ''}${fmtDiaCurto(d.dataKey)}</td>`;
+    let resto;
+    if (!temBatida) resto = `<td colspan="4" class="${d.status === 'falta' ? 'erro' : ''}" style="color:${d.status === 'falta' ? '' : 'var(--muted)'}">${d.status === 'feriado' && nomeFeriado(d.dataKey) ? esc(nomeFeriado(d.dataKey)) : (d.status === 'falta' ? 'Sem batida' : rotulo)}</td>`;
+    else resto = ['entrada', 'saida_almoco', 'volta_almoco', 'saida'].map(t => `<td class="${incompleto && !d.byTipo[t] ? 'aviso' : ''}">${hh(d, t)}</td>`).join('');
+    return `<tr class="clicavel" onclick="abrirCorrecaoDoDia('${d.dataKey}')">${dia}${resto}</tr>`;
+  }).join('');
+  const temIncompleto = dias.some(d => d.status === 'incompleto' || d.status === 'sem_pausa');
+  let estado = null;
+  if (ass) estado = await estadoAssinatura(ass, f.id, periodo, dias);
+  let bloco;
+  const podeAssinar = !pend.length;
+  const botaoAss = (txt) => podeAssinar
+    ? `<button class="btn btn-primary" onclick="abrirAssinaturaMes()">${txt}</button>`
+    : `<div class="assinatura-box" style="border-color:var(--amber)">Você tem ${pend.length} pedido(s) de correção aguardando aprovação neste mês. Assine depois que forem resolvidos.</div>`;
+  if (ass && estado === 'ok' && ass.ate >= ateKey) {
+    bloco = `<div class="assinatura-box" style="border-color:var(--success)">✅ Você assinou este período em ${fmtDataHora(ass.assinado_em)}.<br><span style="color:var(--muted)">Código ${codigoCurto(ass.hash)}</span></div>`;
+  } else if (ass && estado === 'ok') {
+    bloco = `<div class="assinatura-box">Você assinou até ${fmtPeriodo(ass.ate, ass.ate).split(' a ')[0]} (${fmtDataHora(ass.assinado_em)}). Chegaram dias novos desde então.</div>${botaoAss('Assinar até ' + fmtPeriodo(ateKey, ateKey).split(' a ')[0])}`;
+  } else if (ass) {
+    bloco = `<div class="assinatura-box" style="border-color:var(--amber)">⚠ O ponto mudou depois da sua assinatura de ${fmtDataHora(ass.assinado_em)} (ajuste aprovado ou edição da administradora). Confira de novo e assine outra vez.</div>${botaoAss('Assinar novamente')}`;
+  } else {
+    bloco = botaoAss('Está tudo certo — assinar');
+  }
+  out.innerHTML = `
+    <div class="eyebrow" style="margin-top:6px">${esc(f.nome)} · ${fmtPeriodo(periodo + '-01', ateKey)}</div>
+    <div class="card" style="padding:10px 12px">
+      <table><thead><tr><th>Dia</th><th>Entr.</th><th>Saí. alm.</th><th>Volta</th><th>Saída</th></tr></thead><tbody>${linhas}</tbody></table>
+    </div>
+    <div class="muted-small" style="margin:-6px 0 12px">${temIncompleto ? '⚠ = faltou alguma batida. ' : ''}Toque num dia para pedir correção.</div>
+    ${bloco}`;
+}
+
+function abrirCorrecaoDoDia(dataKey) { state.corrDataPre = dataKey; goTo('empCorrigir'); }
+
+function abrirAssinaturaMes() {
+  const c = state.espCache;
+  if (!c) return;
+  const comBatida = c.dias.filter(d => Object.keys(d.byTipo).length > 0).length;
+  const faltas = c.dias.filter(d => d.status === 'falta').length;
+  const incompletos = c.dias.filter(d => d.status === 'incompleto' || d.status === 'sem_pausa').length;
+  mostrarAssinatura({
+    titulo: 'Assinar meu ponto',
+    corpoHtml: `<div class="eyebrow">${fmtPeriodo(c.periodo + '-01', c.ateKey)}</div>
+      <div class="diff">${comBatida} dia(s) com batidas<br>${faltas} dia(s) sem batida<br>${incompletos ? `<span style="color:var(--amber)">${incompletos} dia(s) com batida faltando</span>` : 'Nenhum dia com batida faltando'}</div>`,
+    declaracao: `Declaro que os horários do período de ${fmtPeriodo(c.periodo + '-01', c.ateKey)} conferem com o que realmente aconteceu.`,
+    confirmarJs: 'enviarAssinaturaMes()',
+    botao: 'Assinar'
+  });
+}
+
+async function enviarAssinaturaMes() {
+  const c = state.espCache; const f = empAtual();
+  if (!c || !f) return;
+  if (!(await validarAssinatura())) return;
+  const conteudo = conteudoAssinaturaMes(f.id, c.periodo, c.ateKey, c.dias);
+  const hash = await sha256Hex(conteudo);
+  const { error } = await sb.from('assinaturas').insert({
+    funcionario_id: f.id, periodo: c.periodo, ate: c.ateKey, hash, conteudo,
+    dispositivo: state.empMode === 'pessoal' ? 'pessoal' : 'loja', assinado_em: new Date().toISOString()
+  });
+  if (error) return showToast('Não consegui salvar a assinatura: ' + error.message);
+  fecharAssinatura();
+  const el = document.createElement('div'); el.className = 'feedback';
+  el.innerHTML = `<div class="icon">✓</div><h2>Ponto assinado</h2><p>Código ${codigoCurto(hash)}</p>`;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 2000);
+  carregarEspelho();
+}
+
+/* ===== Administradora: aprovar / recusar correções ===== */
+screens.adminCorrecoes = () => `${topbar('Correções de ponto', "goTo('adminHub')")}
+  <div id="corrAdminOut"><div class="empty">Carregando...</div></div>`;
+
+async function atualizarContadorCorrecoes() {
+  const el = document.getElementById('corrContador');
+  if (!el || !sb) return;
+  const { count, error } = await sb.from('correcoes').select('id', { count: 'exact', head: true }).eq('status', 'pendente');
+  if (!error && count) { el.textContent = count; el.style.display = 'inline-flex'; }
+}
+
+async function carregarCorrecoes() {
+  const out = document.getElementById('corrAdminOut');
+  if (!out) return;
+  if (!sb) { out.innerHTML = '<div class="empty">Sem conexão com o servidor.</div>'; return; }
+  const [res, fres] = await Promise.all([
+    sb.from('correcoes').select('*').order('criado_em', { ascending: false }).limit(60),
+    sb.from('funcionarios').select('id, nome')
+  ]);
+  if (res.error) { out.innerHTML = `<div class="empty">Não consegui carregar: ${esc(res.error.message)}<br>Se é a primeira vez, rode o SQL novo no Supabase.</div>`; return; }
+  const nome = id => ((fres.data || []).find(x => x.id === id) || {}).nome || 'Funcionária';
+  const pend = res.data.filter(r => r.status === 'pendente');
+  const feitas = res.data.filter(r => r.status !== 'pendente').slice(0, 15);
+  const cardPend = c => `<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px"><b>${esc(nome(c.funcionario_id))}</b>${badgeCorrecao(c.status)}</div>
+    <div class="eyebrow" style="margin:10px 0 6px; text-transform:capitalize">${fmtDiaLongo(c.data)}</div>
+    <div class="diff">${diffHorarios(c.original, c.proposto, true)}</div>
+    <div class="muted-small">Motivo: ${esc(c.motivo)}${c.observacao ? ' — ' + esc(c.observacao) : ''}</div>
+    <div class="muted-small">✍️ Assinado com ${c.dispositivo === 'pessoal' ? 'a senha' : 'o PIN'} em ${fmtDataHora(c.assinado_em)} · código ${codigoCurto(c.assinatura_hash)}</div>
+    <div class="select-row" style="margin-top:12px">
+      <button class="btn btn-primary" style="margin-top:0" onclick="aprovarCorrecao('${c.id}')">Aprovar</button>
+      <button class="btn btn-outline" style="margin-top:0" onclick="recusarCorrecao('${c.id}')">Recusar</button>
+    </div></div>`;
+  const linhaFeita = c => `<div class="day-row" style="cursor:default">
+    <div class="dinfo"><div class="dname">${esc(nome(c.funcionario_id))} · ${fmtDiaCurto(c.data)}</div><div class="dnums">${diffHorarios(c.original, c.proposto)}${c.status === 'recusada' && c.decisao_obs ? `<div style="font-size:12px; margin-top:3px">Recusa: ${esc(c.decisao_obs)}</div>` : ''}</div></div>
+    ${badgeCorrecao(c.status)}</div>`;
+  out.innerHTML = `
+    <div class="eyebrow" style="margin-top:6px">Aguardando você (${pend.length})</div>
+    ${pend.length ? pend.map(cardPend).join('') : '<div class="empty" style="padding:16px">Nenhum pedido pendente.</div>'}
+    ${feitas.length ? `<div class="eyebrow" style="margin-top:20px">Já resolvidos</div><div class="card" style="padding:6px 14px">${feitas.map(linhaFeita).join('')}</div>` : ''}`;
+}
+
+async function aprovarCorrecao(id) {
+  if (!sb) return;
+  const { data: c } = await sb.from('correcoes').select('*').eq('id', id).maybeSingle();
+  if (!c || c.status !== 'pendente') { showToast('Esse pedido já foi resolvido'); return carregarCorrecoes(); }
+  const start = new Date(c.data + 'T00:00:00'); const end = new Date(start); end.setDate(end.getDate() + 1);
+  const punches = await getPunchesRange(c.funcionario_id, start, end);
+  const atual = {}; TIPOS.forEach(t => { const p = punches.find(x => x.tipo === t.key); atual[t.key] = p ? hhmm(p.registrado_em) : ''; });
+  if (TIPOS.some(t => (atual[t.key] || '') !== ((c.original || {})[t.key] || ''))) {
+    if (!confirm('Os horários desse dia mudaram depois do pedido. Aprovar vai deixar o dia exatamente como ela assinou. Continuar?')) return;
+  }
+  try {
+    const ok = r => { if (r.error) throw r.error; return r; };
+    for (const t of TIPOS) {
+      const novo = (c.proposto || {})[t.key] || '', existente = punches.find(x => x.tipo === t.key);
+      if (!novo) { if (existente) ok(await sb.from('pontos').delete().eq('id', existente.id)); continue; }
+      const iso = combineLocal(c.data, novo).toISOString();
+      if (existente) { if (atual[t.key] !== novo) ok(await sb.from('pontos').update({ registrado_em: iso }).eq('id', existente.id)); }
+      else {
+        let r = await sb.from('pontos').insert({ funcionario_id: c.funcionario_id, tipo: t.key, dispositivo: 'correcao', registrado_em: iso });
+        if (r.error) r = await sb.from('pontos').insert({ funcionario_id: c.funcionario_id, tipo: t.key, dispositivo: 'admin', registrado_em: iso });
+        ok(r);
+      }
+    }
+    ok(await sb.from('correcoes').update({ status: 'aprovada', decidido_em: new Date().toISOString() }).eq('id', id));
+  } catch (e) { return showToast('Erro ao aplicar: ' + (e.message || e)); }
+  showToast('Correção aprovada e aplicada ao ponto');
+  carregarCorrecoes();
+}
+
+async function recusarCorrecao(id) {
+  if (!sb) return;
+  const obs = prompt('Por que está recusando? (a funcionária vai ver)');
+  if (obs === null) return;
+  const { error } = await sb.from('correcoes').update({ status: 'recusada', decidido_em: new Date().toISOString(), decisao_obs: obs.trim() }).eq('id', id).eq('status', 'pendente');
+  if (error) return showToast('Erro: ' + error.message);
+  showToast('Pedido recusado');
+  carregarCorrecoes();
+}
+
+/* ---------------------------------------------------------------------
    Ações
 --------------------------------------------------------------------- */
 function goTo(screen) {
@@ -1107,7 +1571,13 @@ function goTo(screen) {
     const session = lsGet(LS_PERSONAL_SESSION, null);
     if (session) { state.personalUser = session; goTo('personalPunch'); return; }
   }
+  if (screen === 'kioskPunch') state.empMode = 'loja';
+  if (screen === 'personalPunch') state.empMode = 'pessoal';
   state.screen = screen; render();
+  if (screen === 'adminHub') atualizarContadorCorrecoes();
+  if (screen === 'adminCorrecoes') carregarCorrecoes();
+  if (screen === 'empCorrigir') { carregarDiaCorrecao(); carregarMeusPedidos(); }
+  if (screen === 'empEspelho') carregarEspelho();
   if (screen === 'adminDaily') renderDailyOut();
   if (screen === 'adminFuncionarios') carregarListaFuncionarios();
   if (screen === 'adminReport') popularSelectRelatorio();
