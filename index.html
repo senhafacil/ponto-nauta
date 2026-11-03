@@ -259,11 +259,35 @@ function lsGet(key, fallback) { try { return JSON.parse(localStorage.getItem(key
 function lsSet(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 
 function diasEspeciaisKey(funcId) { return 'ponto_dias_especiais_' + funcId; }
-function getDiasEspeciais(funcId) { return lsGet(diasEspeciaisKey(funcId), {}); }
-function setDiaEspecial(funcId, dataKey, tipo) {
-  const d = getDiasEspeciais(funcId);
-  if (tipo) d[dataKey] = tipo; else delete d[dataKey];
-  lsSet(diasEspeciaisKey(funcId), d);
+/* Marcações de dia (feriado, folga compensada, dispensa...) ficam no banco (tabela dias_especiais),
+   então valem em qualquer aparelho. O cache em memória deixa o cálculo síncrono. */
+const DIAS_ESP = {};
+function getDiasEspeciais(funcId) { return DIAS_ESP[funcId] ?? lsGet(diasEspeciaisKey(funcId), {}); }
+async function carregarDiasEspeciais(funcId) {
+  if (!sb) return;
+  const { data, error } = await sb.from('dias_especiais').select('data, tipo').eq('funcionario_id', funcId);
+  if (error) return; // tabela ainda não criada: segue com o que está salvo neste navegador
+  const m = {}; (data || []).forEach(r => { m[r.data] = r.tipo; });
+  // leva pro banco o que tinha ficado salvo só neste navegador
+  const local = lsGet(diasEspeciaisKey(funcId), {});
+  const novos = Object.entries(local).filter(([k]) => !(k in m));
+  if (novos.length) {
+    const { error: e2 } = await sb.from('dias_especiais').upsert(novos.map(([k, t]) => ({ funcionario_id: funcId, data: k, tipo: t })));
+    if (e2) { DIAS_ESP[funcId] = { ...local, ...m }; return; }
+    novos.forEach(([k, t]) => { m[k] = t; });
+  }
+  if (Object.keys(local).length) { try { localStorage.removeItem(diasEspeciaisKey(funcId)); } catch (e) {} }
+  DIAS_ESP[funcId] = m;
+}
+async function setDiaEspecial(funcId, dataKey, tipo) {
+  const m = { ...getDiasEspeciais(funcId) };
+  if (tipo) m[dataKey] = tipo; else delete m[dataKey];
+  DIAS_ESP[funcId] = m;
+  if (!sb) { lsSet(diasEspeciaisKey(funcId), m); return; }
+  const r = tipo
+    ? await sb.from('dias_especiais').upsert({ funcionario_id: funcId, data: dataKey, tipo })
+    : await sb.from('dias_especiais').delete().eq('funcionario_id', funcId).eq('data', dataKey);
+  if (r.error) { lsSet(diasEspeciaisKey(funcId), m); showToast('Não consegui salvar no banco: ' + r.error.message); }
 }
 
 function queuePunch(entry) { const q = lsGet(LS_QUEUE, []); q.push(entry); lsSet(LS_QUEUE, q); }
@@ -357,16 +381,21 @@ function classificarDia(dataKey, funcionario, punches, isToday) {
   const especialManual = diasEspeciais[dataKey];
   // "normal" força o dia a ignorar o feriado automático (ex: loja aberta num facultativo)
   const especial = especialManual === 'normal' ? undefined : (especialManual || (isFeriadoPadrao(dataKey) ? 'feriado' : undefined));
-  const isFolgaFixa = (funcionario.dias_folga || []).includes(weekday);
+  const isDSR = weekday === 0 || weekday === 1; // domingo e segunda: descanso semanal remunerado (salão fechado)
+  const isFolgaFixa = isDSR || (funcionario.dias_folga || []).includes(weekday);
   const jornada = (funcionario.jornada_diaria_horas || 8) * 60;
   const temPonto = punches.length > 0;
 
-  const base = { dataKey, weekday, especial, especialManual, trabalhado: 0, extra: 0, deficit: 0, indenizacao: 0, taxaExtra: 1.5, byTipo: {}, byTipoDispositivo: {} };
+  const base = { dataKey, weekday, especial, especialManual, trabalhado: 0, extra: 0, deficit: 0, indenizacao: 0, compensado: 0, taxaExtra: 1.5, byTipo: {}, byTipoDispositivo: {} };
   punches.forEach(p => { base.byTipo[p.tipo] = p.registrado_em; base.byTipoDispositivo[p.tipo] = p.dispositivo; });
 
   if (!temPonto) {
     if (especial === 'feriado') return { ...base, status: 'feriado' };
-    if (isFolgaFixa || especial === 'folga_comp' || especial === 'abono') return { ...base, status: 'folga' };
+    if (isFolgaFixa || especial === 'folga_comp' || especial === 'abono' || especial === 'dispensa') {
+      const rotuloFolga = especial === 'dispensa' ? 'Dispensa remunerada' : especial === 'folga_comp' ? 'Folga compensada' : especial === 'abono' ? 'Abono / atestado' : (isDSR ? 'DSR' : 'Folga');
+      const compensado = (especial === 'folga_comp' && !isFolgaFixa) ? jornada : 0; // minutos descontados das horas extras
+      return { ...base, status: 'folga', rotuloFolga, compensado };
+    }
     if (isToday) return { ...base, status: 'pendente' };
     if (date > new Date()) return { ...base, status: 'futuro' };
     return { ...base, status: 'falta', deficit: jornada };
@@ -430,6 +459,7 @@ function statusMeta(status) {
 }
 
 async function calcularPeriodo(funcionario, startDate, endDate) {
+  await carregarDiasEspeciais(funcionario.id);
   const punches = await getPunchesRange(funcionario.id, startDate, endDate);
   const porDia = {};
   punches.forEach(p => { const k = localKey(new Date(p.registrado_em)); (porDia[k] = porDia[k] || []).push(p); });
@@ -443,13 +473,20 @@ async function calcularPeriodo(funcionario, startDate, endDate) {
 }
 
 function resumoDias(dias) {
-  const r = { trabalhado: 0, extraNormal: 0, extraFeriado: 0, deficit: 0, indenizacaoMin: 0 };
+  const r = { trabalhado: 0, extraNormal: 0, extraFeriado: 0, deficit: 0, indenizacaoMin: 0, compensado: 0 };
   dias.forEach(d => {
     r.trabalhado += d.trabalhado;
     if (d.especial === 'feriado') r.extraFeriado += d.extra; else r.extraNormal += d.extra;
     r.deficit += d.deficit;
     r.indenizacaoMin += d.indenizacao;
+    r.compensado += d.compensado || 0;
   });
+  // Folgas compensadas abatem automaticamente das horas extras normais (as de feriado, 100%, não entram na compensação)
+  r.extraNormalBruta = r.extraNormal;
+  const usado = Math.min(r.extraNormal, r.compensado);
+  r.extraNormal -= usado;
+  r.compensadoUsado = usado;
+  r.compensadoExcedente = r.compensado - usado;
   return r;
 }
 
@@ -459,6 +496,7 @@ function resumoDias(dias) {
 function render() { const app = document.getElementById('app'); app.innerHTML = screens[state.screen] ? screens[state.screen]() : screens.home(); startClock(); }
 function showToast(msg) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 2200); }
 function topbar(title, onBack) { return `<div class="topbar"><div class="brand"><div class="mark">N</div><span>${title}</span></div>${onBack ? `<button class="linkbtn" onclick="${onBack}">Voltar</button>` : ''}</div>`; }
+function extraBadge(d) { return d.especial === 'feriado' ? nomeFeriado(d.dataKey) : (d.status === 'folga' && d.rotuloFolga && d.rotuloFolga !== 'Folga' ? d.rotuloFolga.replace('Folga compensada','compensada') : null); }
 function badge(status, extra) { const m = statusMeta(status); return `<span class="badge badge-${m.cls}"><span class="dot"></span>${m.label}${extra ? ' · ' + extra : ''}</span>`; }
 
 /* ---------------------------------------------------------------------
@@ -762,11 +800,12 @@ async function renderDailyOut() {
   out.innerHTML = `<div class="empty">Carregando...</div>`;
   if (!state.adminDailyFocus) {
     const cards = await Promise.all(state.funcionarios.map(async f => {
+      await carregarDiasEspeciais(f.id);
       const punches = await getPunchesToday(f.id);
       const dia = classificarDia(todayKey(), f, punches, true);
       const marks = TIPOS.map(t => `${dia.byTipo[t.key] ? '✓ ' + t.short + ' ' + fmtTimeShort(dia.byTipo[t.key]) : '· ' + t.short + ' —'}`).join('  ');
       return `<div class="emp-card" onclick="setDailyFocus('${f.id}'); document.getElementById('dailySel').value='${f.id}'">
-        <div class="top"><b>${f.nome}</b>${badge(dia.status, dia.especial === 'feriado' ? nomeFeriado(dia.dataKey) : null)}</div>
+        <div class="top"><b>${f.nome}</b>${badge(dia.status, extraBadge(dia))}</div>
         <div class="times">${marks}</div>
       </div>`;
     }));
@@ -784,10 +823,10 @@ async function renderDailyOut() {
     const label = d.dataKey === todayKey() ? 'Hoje' : dateObj.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
     const nums = (d.status === 'completo' || d.status === 'andamento' || d.status === 'incompleto' || d.status === 'sem_pausa')
       ? `${fmtHoras(d.trabalhado)} trabalhado${d.extra > 0 ? ' · +' + fmtHoras(d.extra) + ' extra' : ''}${d.deficit > 0 ? ' · -' + fmtHoras(d.deficit) : ''}${d.indenizacao > 0 ? ' · intervalo suprimido' : ''}`
-      : '';
+      : (d.compensado ? `${fmtHoras(d.compensado)} descontadas das horas extras` : '');
     return `<div class="day-row" onclick="abrirEdicaoDia('${f.id}','${d.dataKey}')">
       <div class="dinfo"><div class="dname">${label}</div><div class="dnums">${nums}</div></div>
-      ${badge(d.status, d.especial === 'feriado' ? nomeFeriado(d.dataKey) : null)}
+      ${badge(d.status, extraBadge(d))}
     </div>`;
   }).join('');
   out.innerHTML = `
@@ -818,7 +857,8 @@ screens.adminDayEdit = () => {
       <option value="" ${especialAtual === '' ? 'selected' : ''}>${nomeFer ? 'Automático (feriado — extra 100% se ela bater ponto)' : 'Automático (dia normal)'}</option>
       ${nomeFer ? `<option value="normal" ${especialAtual === 'normal' ? 'selected' : ''}>Normal (loja abriu, ignorar o feriado)</option>` : ''}
       <option value="feriado" ${especialAtual === 'feriado' ? 'selected' : ''}>Forçar feriado (extra 100%)</option>
-      <option value="folga_comp" ${especialAtual === 'folga_comp' ? 'selected' : ''}>Folga compensada</option>
+      <option value="dispensa" ${especialAtual === 'dispensa' ? 'selected' : ''}>Dispensa remunerada (paga normal, NÃO desconta das extras)</option>
+      <option value="folga_comp" ${especialAtual === 'folga_comp' ? 'selected' : ''}>Folga compensada (desconta da hora extra automaticamente)</option>
       <option value="abono" ${especialAtual === 'abono' ? 'selected' : ''}>Abono / atestado</option>
     </select>
     <button class="btn btn-primary" style="margin-top:4px" onclick="salvarEdicaoDia()">Salvar</button>
@@ -867,7 +907,7 @@ async function salvarEdicaoDia() {
     }
   }
   const especial = document.getElementById('diaEspecialSel').value;
-  setDiaEspecial(funcId, dataKey, especial || null);
+  await setDiaEspecial(funcId, dataKey, especial || null);
   showToast('Dia atualizado!');
   state.adminDailyFocus = funcId;
   goTo('adminDaily');
@@ -919,7 +959,7 @@ async function carregarRelatorio() {
   else if (totalExtraH > 0 && r.deficit > 0) { bannerCls = 'badge-andamento'; bannerTxt = `Tem os dois: ${fmtHoras(totalExtraH)} extra e ${fmtHoras(r.deficit)} devedora — saldo final ${saldoMin >= 0 ? '+' : ''}${fmtHoras(saldoMin)}`; }
   const linhas = dias.filter(d => d.status !== 'futuro').map(d => `
     <tr>
-      <td>${new Date(d.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'})} ${badge(d.status, d.especial === 'feriado' ? nomeFeriado(d.dataKey) : null)}</td>
+      <td>${new Date(d.dataKey + 'T12:00:00').toLocaleDateString('pt-BR', {day:'2-digit', month:'2-digit'})} ${badge(d.status, extraBadge(d))}</td>
       <td class="num">${d.trabalhado ? fmtHoras(d.trabalhado) : '—'}</td>
       <td class="num ${d.extra > 0 ? 'extra' : ''}">${d.extra > 0 ? fmtHoras(d.extra) : '—'}</td>
       <td class="num ${d.deficit > 0 ? 'deficit' : ''}">${d.deficit > 0 ? fmtHoras(d.deficit) : '—'}</td>
@@ -943,6 +983,7 @@ async function carregarRelatorio() {
       <div class="summary-box"><div class="n">${fmtHoras(totalExtraH)}</div><div class="l">Extras</div></div>
       <div class="summary-box"><div class="n">${fmtHoras(r.deficit)}</div><div class="l">Devedoras</div></div>
     </div>
+    ${r.compensado ? `<div class="assinatura-box">🗓 Folgas compensadas no mês: ${fmtHoras(r.compensado)}. Horas extras: ${fmtHoras(r.extraNormalBruta)} − ${fmtHoras(r.compensadoUsado)} compensadas = <b>${fmtHoras(r.extraNormal)}</b> a pagar${r.extraFeriado ? ' (+ ' + fmtHoras(r.extraFeriado) + ' de feriado)' : ''}.${r.compensadoExcedente ? `<br><span style="color:var(--muted)">Sobraram ${fmtHoras(r.compensadoExcedente)} de folga além das horas extras do mês (ficam como dispensa, sem desconto).</span>` : ''}</div>` : ''}
     ${valorHora ? `<div class="summary-grid">
       <div class="summary-box"><div class="n">R$ ${valorExtras.toFixed(2)}</div><div class="l">Valor horas extras</div></div>
       <div class="summary-box"><div class="n">R$ ${valorIndenizacao.toFixed(2)}</div><div class="l">Indenização intervalo</div></div>
@@ -1027,7 +1068,14 @@ function gerarPdfRelatorio(d) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
     doc.text(c.label, cx + 10, y + 36);
   });
-  y += 46 + 20;
+  y += 46 + 12;
+  if (r.compensado) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
+    const linhaComp = `Folgas compensadas: ${fmtHoras(r.compensado)}. Horas extras ${fmtHoras(r.extraNormalBruta)} - ${fmtHoras(r.compensadoUsado)} compensadas = ${fmtHoras(r.extraNormal)} a pagar${r.extraFeriado ? ' (+ ' + fmtHoras(r.extraFeriado) + ' de feriado)' : ''}.${r.compensadoExcedente ? ' Sobraram ' + fmtHoras(r.compensadoExcedente) + ' de folga alem das extras (dispensa, sem desconto).' : ''}`;
+    const lc = doc.splitTextToSize(linhaComp, 515);
+    doc.text(lc, margem, y + 4); y += lc.length * 11 + 4;
+  }
+  y += 8;
 
   // Legenda de cores
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
@@ -1053,7 +1101,7 @@ function gerarPdfRelatorio(d) {
     const meta = STATUS_PDF_META[x.status] || STATUS_PDF_META.pendente;
     let situacao = '—', corSituacao = meta.cor;
     if (x.status === 'falta') situacao = 'Falta';
-    else if (x.status === 'folga') situacao = 'Folga';
+    else if (x.status === 'folga') situacao = (x.rotuloFolga || 'Folga') + (x.compensado ? ' (-' + fmtHoras(x.compensado) + ' das extras)' : '');
     else if (x.status === 'feriado' && !x.byTipo.entrada) situacao = 'Feriado';
     else {
       const partes = [];
@@ -1416,7 +1464,7 @@ async function carregarEspelho() {
     const incompleto = d.status === 'incompleto' || d.status === 'sem_pausa';
     const dia = `<td>${incompleto ? '⚠ ' : ''}${fmtDiaCurto(d.dataKey)}</td>`;
     let resto;
-    if (!temBatida) resto = `<td colspan="4" class="${d.status === 'falta' ? 'erro' : ''}" style="color:${d.status === 'falta' ? '' : 'var(--muted)'}">${d.status === 'feriado' && nomeFeriado(d.dataKey) ? esc(nomeFeriado(d.dataKey)) : (d.status === 'falta' ? 'Sem batida' : rotulo)}</td>`;
+    if (!temBatida) resto = `<td colspan="4" class="${d.status === 'falta' ? 'erro' : ''}" style="color:${d.status === 'falta' ? '' : 'var(--muted)'}">${d.status === 'feriado' && nomeFeriado(d.dataKey) ? esc(nomeFeriado(d.dataKey)) : (d.status === 'falta' ? 'Sem batida' : (d.rotuloFolga || rotulo))}</td>`;
     else resto = ['entrada', 'saida_almoco', 'volta_almoco', 'saida'].map(t => `<td class="${incompleto && !d.byTipo[t] ? 'aviso' : ''}">${hh(d, t)}</td>`).join('');
     return `<tr class="clicavel" onclick="abrirCorrecaoDoDia('${d.dataKey}')">${dia}${resto}</tr>`;
   }).join('');
