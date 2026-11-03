@@ -229,6 +229,7 @@ let state = {
   personalUser: null,
   adminOk: false,
   adminDailyFocus: null, // id da funcionária focada no histórico
+  adminDailyMes: null,   // 'AAAA-MM' do histórico (padrão: mês atual)
   adminFuncionariosAll: [],
   adminEditingId: null,
   adminEditDay: null,
@@ -814,9 +815,16 @@ async function renderDailyOut() {
     return;
   }
   const f = state.funcionarios.find(x => x.id === state.adminDailyFocus);
-  const end = new Date(); end.setHours(0,0,0,0); end.setDate(end.getDate() + 1);
-  const start = new Date(end); start.setDate(start.getDate() - 21);
+  const hoje = new Date();
+  const mesSel = state.adminDailyMes || `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const [anoSel, mesNum] = mesSel.split('-').map(Number);
+  const start = new Date(anoSel, mesNum - 1, 1);
+  const fimMes = new Date(anoSel, mesNum, 1);
+  const amanha = new Date(); amanha.setHours(0, 0, 0, 0); amanha.setDate(amanha.getDate() + 1);
+  const end = fimMes < amanha ? fimMes : amanha;
   const dias = await calcularPeriodo(f, start, end);
+  const resumo = resumoDias(dias);
+  const opcoesMes = Array.from({ length: 12 }, (_, i) => { const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1); const v = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; return `<option value="${v}" ${v === mesSel ? 'selected' : ''}>${MESES_NOME[d.getMonth()]} ${d.getFullYear()}</option>`; }).join('');
   dias.reverse();
   const rows = dias.map(d => {
     const dateObj = new Date(d.dataKey + 'T12:00:00');
@@ -830,7 +838,13 @@ async function renderDailyOut() {
     </div>`;
   }).join('');
   out.innerHTML = `
-    <div class="eyebrow" style="margin-top:6px">${f.nome} · últimos 21 dias</div>
+    <select onchange="state.adminDailyMes=this.value; renderDailyOut()">${opcoesMes}</select>
+    <div class="eyebrow" style="margin-top:2px">${f.nome} · ${MESES_NOME[mesNum - 1]} ${anoSel}</div>
+    <div class="summary-grid g3" style="margin-top:6px">
+      <div class="summary-box"><div class="n">${fmtHoras(resumo.trabalhado)}</div><div class="l">Trabalhadas</div></div>
+      <div class="summary-box"><div class="n">${fmtHoras(resumo.extraNormal + resumo.extraFeriado)}</div><div class="l">Extras</div></div>
+      <div class="summary-box"><div class="n">${fmtHoras(resumo.deficit)}</div><div class="l">Devedoras</div></div>
+    </div>
     <div class="card" style="padding:6px 14px">${rows}</div>
     <div class="muted-small">Toque num dia para editar os horários batidos (caso ela tenha esquecido) ou marcar feriado trabalhado, folga compensada ou abono/atestado.</div>
   `;
