@@ -1210,6 +1210,17 @@ const MOTIVOS_CORRECAO = [
   'Outro motivo'
 ];
 
+/* Prazo de correção: mês atual; o mês passado também até o 3º dia útil (segunda a sábado, sem feriado) do mês atual */
+function limiteCorrecao() {
+  const h = new Date(), ano = h.getFullYear(), mes = h.getMonth();
+  let n = 0, terceiro = null;
+  for (let d = 1; d <= 31 && n < 3; d++) {
+    const dt = new Date(ano, mes, d); if (dt.getMonth() !== mes) break;
+    if (dt.getDay() !== 0 && !isFeriadoPadrao(localKey(dt))) { n++; if (n === 3) terceiro = localKey(dt); }
+  }
+  const passadoAberto = !!terceiro && todayKey() <= terceiro;
+  return { min: localKey(new Date(ano, passadoAberto ? mes - 1 : mes, 1)), terceiro, passadoAberto };
+}
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function hhmm(iso) { return new Date(iso).toTimeString().slice(0, 5); }
 function fmtDiaLongo(dataKey) { return new Date(dataKey + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' }); }
@@ -1297,13 +1308,13 @@ function badgeCorrecao(status) {
 
 /* ===== Funcionária: corrigir um ponto ===== */
 screens.empCorrigir = () => {
-  const hoje = new Date(); const min = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+  const hoje = new Date(); const lim = limiteCorrecao();
   const pre = state.corrDataPre; state.corrDataPre = null;
-  const valor = (pre && pre >= localKey(min) && pre <= localKey(hoje)) ? pre : localKey(hoje);
+  const valor = (pre && pre >= lim.min && pre <= localKey(hoje)) ? pre : localKey(hoje);
   return `${topbar('Corrigir ponto', empVoltarJs())}
-    <div class="muted-small" style="margin:-8px 0 14px">Escolha o dia deste mês, acerte os horários e assine. A correção só passa a valer nas contas depois que a administradora aprovar.</div>
+    <div class="muted-small" style="margin:-8px 0 14px">Escolha o dia, acerte os horários e assine.${lim.passadoAberto ? ` Você ainda pode acertar o mês passado até ${fmtDiaCurto(lim.terceiro)} (3º dia útil).` : ' Só dá para corrigir dias do mês atual.'} A correção só passa a valer nas contas depois que a administradora aprovar.</div>
     <label>Dia</label>
-    <input type="date" id="corrData" value="${valor}" min="${localKey(min)}" max="${localKey(hoje)}" onchange="carregarDiaCorrecao()">
+    <input type="date" id="corrData" value="${valor}" min="${lim.min}" max="${localKey(hoje)}" onchange="carregarDiaCorrecao()">
     <div class="card"><div id="corrCampos"><div class="empty">Carregando...</div></div></div>
     <label>Motivo</label>
     <select id="corrMotivo">${MOTIVOS_CORRECAO.map(m => `<option>${m}</option>`).join('')}</select>
@@ -1339,7 +1350,7 @@ async function abrirAssinaturaCorrecao() {
   if (!sb) return showToast('Sem conexão com o servidor. Tente de novo em instantes.');
   const dataKey = document.getElementById('corrData').value;
   if (dataKey !== o.dataKey) return showToast('Aguarde o dia carregar');
-  { const h = new Date(); if (dataKey < localKey(new Date(h.getFullYear(), h.getMonth(), 1)) || dataKey > todayKey()) return showToast('Só dá pra corrigir dias do mês atual'); }
+  { const lim = limiteCorrecao(); if (dataKey < lim.min || dataKey > todayKey()) return showToast(lim.passadoAberto ? 'Esse dia está fora do prazo de correção' : 'Só dá pra corrigir dias do mês atual (o mês passado fecha no 3º dia útil)'); }
   const prop = {}; TIPOS.forEach(t => prop[t.key] = document.getElementById('ctime_' + t.key)?.value || '');
   if (!TIPOS.some(t => prop[t.key] !== o.orig[t.key])) return showToast('Você ainda não mudou nenhum horário');
   const preench = TIPOS.filter(t => prop[t.key]);
